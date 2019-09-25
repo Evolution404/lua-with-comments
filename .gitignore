@@ -1,0 +1,7 @@
+*.o
+*.a
+lua
+luac
+test*
+*.lua
+tags

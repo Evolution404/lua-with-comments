@@ -125,7 +125,7 @@ solaris:
 	$(MAKE) $(ALL) SYSCFLAGS="-DLUA_USE_POSIX -DLUA_USE_DLOPEN -D_REENTRANT" SYSLIBS="-ldl"
 
 test: test.c $(CORE_O) $(LIB_O)
-	gcc -ggdb3 -O0 -gdwarf-2 test.c $(CORE_O) $(LIB_O) -o test
+	gcc -ggdb3 -O0 -gdwarf-2 test.c $(CORE_O) $(LIB_O) -o test -lm
 
 # list targets that do not create files (but not all makes understand .PHONY)
 .PHONY: all $(PLATS) default o a clean depend echo none

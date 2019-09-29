@@ -217,8 +217,14 @@ union GCUnion {
 
 
 /* macro to convert a Lua object into a GCObject */
+// 将可回收类型指针 转换成 GCObject*类型
+// 先转换成gcunion再取出gcunion的gc字段
+// 经过测试将 &(cast_u(v)->gc) 换成 cast(GCObject *, (v))效果是一样的
+// 实质上就是将v指针的类型转换成GCObject* 不经过GCUnion进行中转也是一样的
+// 其实改成 cast_u(v)编译也不会报错 只是会报出一些类型不匹配的警告
 #define obj2gco(v) \
-	check_exp(novariant((v)->tt) < LUA_TDEADKEY, (&(cast_u(v)->gc)))
+  check_exp(novariant((v)->tt) < LUA_TDEADKEY, (&(cast_u(v)->gc)))
+	//check_exp(novariant((v)->tt) < LUA_TDEADKEY, (cast(GCObject *, (v))))
 
 
 /* actual number of total bytes allocated */

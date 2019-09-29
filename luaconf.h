@@ -732,7 +732,9 @@
 ** coercion from strings to numbers.
 */
 /* #define LUA_NOCVTN2S */
+// 启用LUA_NOCVTN2S print(1 .. 2)将报错
 /* #define LUA_NOCVTS2N */
+// 启用LUA_NOCVTS2N print("1"+"1")将报错
 
 
 /*
@@ -761,6 +763,7 @@
 ** its only purpose is to stop Lua from consuming unlimited stack
 ** space (and to reserve some numbers for pseudo-indices).
 */
+// LUAI_MAXSTACK lua调用栈的最大深度, 超过这个深度将报错
 #if LUAI_BITSINT >= 32
 #define LUAI_MAXSTACK		1000000
 #else
@@ -773,6 +776,7 @@
 ** a Lua state with very fast access.
 ** CHANGE it if you need a different size.
 */
+// 分配给lua虚拟机的额外空间
 #define LUA_EXTRASPACE		(sizeof(void *))
 
 
@@ -781,6 +785,7 @@
 @@ of a function in debug information.
 ** CHANGE it if you want a different size.
 */
+// 调试时输出的有关函数来源的描述的最大长度
 #define LUA_IDSIZE	60
 
 

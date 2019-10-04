@@ -190,6 +190,9 @@ struct lua_State {
 /*
 ** Union of all collectable objects (only for conversions)
 */
+// GCUnion中各个项除了Closure都是以common header开始的
+// 所以在强制类型转换的时候引用common header里的项不会有问题
+// 例如TString以common header开头, 强制转换为GCUnion访问gc项与直接ts->gc是一样的
 union GCUnion {
   GCObject gc;  /* common header */
   struct TString ts;

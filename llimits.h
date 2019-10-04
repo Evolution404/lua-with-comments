@@ -300,8 +300,16 @@ typedef unsigned long Instruction;
  * luai_nummod展开结果
  * { (m) = fmod(a,b); if ((m)*(b) < 0) (m) += (b); }
  * fmod是a/b的余数
+ * 关于求模和求余
+ * 求模在计算a/b时向负无穷靠近 求余在计算a/b时向0靠近
+ * lua中%是求模 c中%是求余 c语言中fmod与%都是求余 fmod可以计算浮点数
+ * 例如计算 4%-3
+ * 求模 4/-3 得-2(向负无穷) 最终结果 4-(-3*-2) 为-2
+ * 求余 4/-3 得-1(向0) 最终结果 4-(-3*-1) 为 1
+ * 可以发现求模与求余只有在a,b异号时结果不同 且求模结果 = 求余结果 + b
  * */
 #if !defined(luai_nummod)
+// 先使用fmod计算求余结果 如果a,b异号 将求余结果加上b得到求模结果
 #define luai_nummod(L,a,b,m)  \
   { (m) = l_mathop(fmod)(a,b); if ((m)*(b) < 0) (m) += (b); }
 #endif

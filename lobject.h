@@ -316,7 +316,7 @@ typedef struct lua_TValue {
 #define setdeadvalue(obj)	settt_(obj, LUA_TDEADKEY)
 
 
-
+// 直接进行赋值
 #define setobj(L,obj1,obj2) \
 	{ TValue *io1=(obj1); *io1 = *(obj2); \
 	  (void)L; checkliveness(L,io1); }
@@ -326,6 +326,8 @@ typedef struct lua_TValue {
 ** different types of assignments, according to destination
 */
 
+// 以下宏只是对上面各种赋值宏的重命名 更好的语义化
+// 功能也是进行值复制
 /* from stack to (same) stack */
 #define setobjs2s	setobj
 /* to stack (not from same stack) */
@@ -363,9 +365,16 @@ typedef TValue *StkId;  /* index to stack elements */
 */
 typedef struct TString {
   CommonHeader;
+  // 对于短字符串 用于标记是内部保留字,也就是关键字
+  // 是不支持自动回收的,在GC过程中会略过对这个字符串的处理 luaX_tokens
+  // 对于长字符串 用于标记已经计算了哈希值
   lu_byte extra;  /* reserved words for short strings; "has hash" for longs */
+  // 短字符串的长度
   lu_byte shrlen;  /* length for short strings */
+  // 字符串的hash值,字符串的比较可以通过hash值
   unsigned int hash;
+  // 对于长字符串这里记录字符串长度
+  // 对于短字符串这里记录下一个的地址
   union {
     size_t lnglen;  /* length for long strings */
     struct TString *hnext;  /* linked list for hash table */
@@ -376,6 +385,7 @@ typedef struct TString {
 /*
 ** Ensures that address after this type is always fully aligned.
 */
+// 只是用来计算sizeof(UTString)代表TString的大小 没有其他作用
 typedef union UTString {
   L_Umaxalign dummy;  /* ensures maximum alignment for strings */
   TString tsv;
@@ -386,17 +396,21 @@ typedef union UTString {
 ** Get the actual string (array of bytes) from a 'TString'.
 ** (Access to 'extra' ensures that value is really a 'TString'.)
 */
+// 真实的字符串就存储在TString后面, 加上UTString的大小即可
 #define getstr(ts)  \
   check_exp(sizeof((ts)->extra), cast(char *, (ts)) + sizeof(UTString))
 
 
 /* get the actual string (array of bytes) from a Lua value */
+// 从TValue类型取出真实字符串
 #define svalue(o)       getstr(tsvalue(o))
 
 /* get string length from 'TString *s' */
+// 从TSvalue获取字符串长度
 #define tsslen(s)	((s)->tt == LUA_TSHRSTR ? (s)->shrlen : (s)->u.lnglen)
 
 /* get string length from 'TValue *o' */
+// 从TValue获取字符串长度
 #define vslen(o)	tsslen(tsvalue(o))
 
 
@@ -405,10 +419,13 @@ typedef union UTString {
 ** (aligned according to 'UUdata'; see next).
 */
 typedef struct Udata {
+  // commonHeader中的tt 指定了类型位Udata
   CommonHeader;
+  // ttuv_ 指定Udata内部存储的用户类型的类型
   lu_byte ttuv_;  /* user value's tag */
   struct Table *metatable;
   size_t len;  /* number of bytes */
+  // ? 为什么不使用TValue类型 而是使用Value类型并且将类型放在外部使用ttuv_指定
   union Value user_;  /* user value */
 } Udata;
 
@@ -429,6 +446,7 @@ typedef union UUdata {
 #define getudatamem(u)  \
   check_exp(sizeof((u)->ttuv_), (cast(char*, (u)) + sizeof(UUdata)))
 
+// 不论是get还是set都是两步 1.设置值 2.设置type tag
 // 把o的值设置到u上 o是TValue,u是Udata
 #define setuservalue(L,u,o) \
 	{ const TValue *io=(o); Udata *iu = (u); \
@@ -445,9 +463,15 @@ typedef union UUdata {
 /*
 ** Description of an upvalue for function prototypes
 */
+// upvalue的描述信息
 typedef struct Upvaldesc {
+  // upvalue的名称
   TString *name;  /* upvalue name (for debug information) */
+  // 该upvalue是否在父函数栈上
   lu_byte instack;  /* whether it is in stack (register) */
+  // 索引位置信息
+  // 对于关闭的upvalue ,已经无法从栈上获取到,idx 指外层函数的upvalue 表中的索引号
+  // 对于在数据栈上的 upvalue ,序号即是变量对应的寄存器号
   lu_byte idx;  /* index of upvalue (in stack or in outer function's list) */
 } Upvaldesc;
 
@@ -456,8 +480,10 @@ typedef struct Upvaldesc {
 ** Description of a local variable for function prototypes
 ** (used for debug information)
 */
+// 局部变量的描述信息
 typedef struct LocVar {
   TString *varname;
+  // start和end指定了变量的作用域
   int startpc;  /* first point where variable is active */
   int endpc;    /* first point where variable is dead */
 } LocVar;
@@ -466,21 +492,31 @@ typedef struct LocVar {
 /*
 ** Function Prototypes
 */
+// 函数原型
 typedef struct Proto {
   CommonHeader;
+  // 函数的固定参数的个数
   lu_byte numparams;  /* number of fixed parameters */
+  // 该函数是否支持可变参数, 如果是1 说明最后一个参数是可变参数
   lu_byte is_vararg;
+  // 该函数最多使用几个寄存器
   lu_byte maxstacksize;  /* number of registers needed by this function */
   int sizeupvalues;  /* size of 'upvalues' */
+  // 常量的个数
   int sizek;  /* size of 'k' */
+  // 该函数中指令的条数
   int sizecode;
   int sizelineinfo;
+  // 该函数的子函数个数
   int sizep;  /* size of 'p' */
   int sizelocvars;
   int linedefined;  /* debug information  */
   int lastlinedefined;  /* debug information  */
+  // 该函数使用的常量表
   TValue *k;  /* constants used by the function */
+  // 解析该函数后的指令都被存到code项里面
   Instruction *code;  /* opcodes */
+  // 子函数表
   struct Proto **p;  /* functions defined inside the function */
   int *lineinfo;  /* map from opcodes to source lines (debug information) */
   LocVar *locvars;  /* information about local variables (debug information) */
@@ -501,10 +537,14 @@ typedef struct UpVal UpVal;
 /*
 ** Closures
 */
+// 闭包都属于LUA_TFUNCTION类型
 
+// nupvalues指定upvalue的个数
 #define ClosureHeader \
 	CommonHeader; lu_byte nupvalues; GCObject *gclist
 
+// luaF_newCclosure
+// c函数闭包 包括一个c函数指针和相关的upvalue
 typedef struct CClosure {
   ClosureHeader;
   lua_CFunction f;
@@ -512,6 +552,8 @@ typedef struct CClosure {
 } CClosure;
 
 
+// luaF_newLclosure
+// lua闭包 包括一个lua函数原型和相关的upvalue
 typedef struct LClosure {
   ClosureHeader;
   struct Proto *p;
@@ -519,14 +561,17 @@ typedef struct LClosure {
 } LClosure;
 
 
+// 统一两种闭包类型
 typedef union Closure {
   CClosure c;
   LClosure l;
 } Closure;
 
 
+// 检查是否是lua闭包
 #define isLfunction(o)	ttisLclosure(o)
 
+// 获取函数原型 就是获取lua闭包中的proto
 #define getproto(o)	(clLvalue(o)->p)
 
 
@@ -534,10 +579,26 @@ typedef union Closure {
 ** Tables
 */
 
-// 在table的哈希表部分使用key中的next来连接起来构成链表
-// 不直接使用指针可能是为了节省空间
-// 也有可能是这个哈希表使用了开放定址法
+/*
+TKey完全可以按照这种方式来定义
+typedef struct TKey {
+  TValue tvk;
+  int next;
+} TKey;
+TValue内有Value占用8字节,int型tt_占用4字节 字节对齐浪费4字节总共16字节
+加上int型next占用4字节按8字节对齐 总共24字节
 
+但是如果按照下面的方式进行定义, TValuefields就占用了TValue的前12字节, next利用了字节对齐的4字节
+总共只有16字节 每一个key都省了8个字节
+
+这种定义在内存分布上等价于
+typedef struct TKey {
+  TValuefields;
+  int next;
+} TKey;
+使用union可以转换为TValue类型,与之前的类型统一
+
+*/
 typedef union TKey {
   struct {
     TValuefields;
@@ -548,38 +609,41 @@ typedef union TKey {
 
 
 /* copy a value into a key without messing up field 'next' */
+// 向TKey类型写入一个TValue
+// 直接写入tvk会导致next被覆盖
 #define setnodekey(L,key,obj) \
 	{ TKey *k_=(key); const TValue *io_=(obj); \
 	  k_->nk.value_ = io_->value_; k_->nk.tt_ = io_->tt_; \
 	  (void)L; checkliveness(L,io_); }
 
 
+// Node就是table的一项 分为键和值
 typedef struct Node {
   TValue i_val;
   TKey i_key;
 } Node;
 
-//  flags 字段是一个 byte 类型，用于表示在这个表中提供了哪些元方法,默认为0；
-//  当查找过至少一次以后，如果该表中存在某个元方法，那么就将该元方法对应的 flag 位置为1,这样下一次查找时只需要判断该位即可。所有的元方法映射的bit 在 ltm.h中定义
-//  lsizenode 字段是该表Hash桶大小的log2值,Hash桶数组大小一定是2的次方,当扩展Hash桶的时候每次需要乘以2。
-//  sizearray 字段表示该表数组部分的size
-//  array 指向该表的数组部分的起始位置。
-//  node 指向该表的Hash部分的起始位置。
-//  lastfree 指向Lua表的Hash 部分的末尾位置。
-//  metatable 元表。
-//  gclist GC相关的链表。 
-//  结构图如下
-//  https://img-blog.csdn.net/20170818102937416?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvbGl1dGlhbnNoeDIwMTI=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast
+  // 结构图如下
+  // https://img-blog.csdn.net/20170818102937416?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvbGl1dGlhbnNoeDIwMTI=/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast
 
 typedef struct Table {
   CommonHeader;
+  // flags 字段是一个 byte 类型，用于表示在这个表中提供了哪些元方法,默认为0；
+  // 当查找过至少一次以后，如果该表中存在某个元方法，那么就将该元方法对应的 flag 位置为1,这样下一次查找时只需要判断该位即可。所有的元方法映射的bit TMS 中
   lu_byte flags;  /* 1<<p means tagmethod(p) is not present */
+  // lsizenode 字段是该表Hash桶大小的log2值,Hash桶数组大小一定是2的次方,当扩展Hash桶的时候每次需要乘以2。
   lu_byte lsizenode;  /* log2 of size of 'node' array */
+  // sizearray 字段表示该表数组部分的size
   unsigned int sizearray;  /* size of 'array' array */
+  // array 指向该表的数组部分的起始位置。
   TValue *array;  /* array part */
+  // node 指向该表的Hash部分的起始位置。
   Node *node;
+  // lastfree 指向Lua表的Hash 部分的末尾位置。
   Node *lastfree;  /* any free position is before this position */
+  // metatable 元表。
   struct Table *metatable;
+  // gclist GC相关的链表。 
   GCObject *gclist;
 } Table;
 
@@ -588,6 +652,8 @@ typedef struct Table {
 /*
 ** 'module' operation for hashing (size is always a power of 2)
 */
+// 求s%size 由于size一定是2的指数 所以使用了下面的位运算加速
+// 当b是2的指数时 mod(a,b) 与 a&(b-1)等价 一般的编译器也会对这种情况进行优化
 #define lmod(s,size) \
 	(check_exp((size&(size-1))==0, (cast(int, (s) & ((size)-1)))))
 
@@ -600,6 +666,7 @@ typedef struct Table {
 /*
 ** (address of) a fixed nil value
 */
+// 全局唯一的nil变量
 #define luaO_nilobject		(&luaO_nilobject_)
 
 

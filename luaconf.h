@@ -297,8 +297,10 @@
 #endif				/* } */
 
 // DEC declarations
+// 在声明时使用
 #define LUAI_DDEC	LUAI_FUNC
 // DEF definitions
+// 在定义时使用
 #define LUAI_DDEF	/* empty */
 
 /* }================================================================== */

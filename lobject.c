@@ -29,7 +29,7 @@
 #include "lvm.h"
 
 
-
+// LUAI_DDEF目前就是空 全局常量在定义时的标记
 LUAI_DDEF const TValue luaO_nilobject_ = {NILCONSTANT};
 
 
@@ -38,13 +38,20 @@ LUAI_DDEF const TValue luaO_nilobject_ = {NILCONSTANT};
 ** (eeeeexxx), where the real value is (1xxx) * 2^(eeeee - 1) if
 ** eeeee != 0 and (xxx) otherwise.
 */
+// 使用浮点数的方法扩充整数范围
+// 最后三位是基数 剩余位数是指数位
 int luaO_int2fb (unsigned int x) {
-  int e = 0;  /* exponent */
+  int e = 0;  /* exponent 指数部分 */ 
+  // 三位基数可以表示到7 指数位为0 直接返回
   if (x < 8) return x;
+  // 先一次移动4位
+  // 8<<4 00000000 00000000 00000000 10000000
   while (x >= (8 << 4)) {  /* coarse steps */
-    x = (x + 0xf) >> 4;  /* x = ceil(x / 16) */
-    e += 4;
+    x = (x + 0xf) >> 4;  /* x = ceil(x / 16) 基数位除16 并向上取整 */
+    // 经过测试这样性能提升不明显 也许是被编译器优化了
+    e += 4; // 指数位加4 相当于乘16
   }
+  // 一次移动1位
   while (x >= (8 << 1)) {  /* fine steps */
     x = (x + 1) >> 1;  /* x = ceil(x / 2) */
     e++;
@@ -54,6 +61,7 @@ int luaO_int2fb (unsigned int x) {
 
 
 /* converts back */
+// 上面函数的反函数, 逆向操作
 int luaO_fb2int (int x) {
   return (x < 8) ? x : ((x & 7) + 8) << ((x >> 3) - 1);
 }
@@ -75,14 +83,35 @@ int luaO_ceillog2 (unsigned int x) {
     8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8
   };
   int l = 0;
+  // 小于等于256的数字可以直接从数组中取出结果 计算ceil(log2(17)) 取log_2[16]即可
+  // 大于256的数字 ceil(log2(x)) = ceil(log2((x-1)//256+1)) + 8
+  // 例如512是ceil(log2(2))+8    513是ceil(log2(3))+8 所以结果前者是9后者是10
   x--;
   while (x >= 256) { l += 8; x >>= 8; }
   return l + log_2[x];
 }
 
 
+// arith arithmetic lua的算术运算
+// LUA_OPADD: 加法 (+)
+// LUA_OPSUB: 减法 (-)
+// LUA_OPMUL: 乘法 (*)
+// LUA_OPDIV: 浮点除法 (/)
+// LUA_OPIDIV: 向下取整的除法 (//)
+// LUA_OPMOD: 取模 (%)
+// LUA_OPPOW: 乘方 (^)
+// LUA_OPUNM: 取负 (一元 -)
+// LUA_OPBNOT: 按位取反 (~)
+// LUA_OPBAND: 按位与 (&)
+// LUA_OPBOR: 按位或 (|)
+// LUA_OPBXOR: 按位异或 (~)
+// LUA_OPSHL: 左移 (<<)
+// LUA_OPSHR: 右移 (>>)
+
+// 关于整数的算术运算
 static lua_Integer intarith (lua_State *L, int op, lua_Integer v1,
                                                    lua_Integer v2) {
+  // intop(+,v1,v2)  ((lua_Integer)(((lua_Unsigned)(v1)) + ((lua_Unsigned)(v2))))
   switch (op) {
     case LUA_OPADD: return intop(+, v1, v2);
     case LUA_OPSUB:return intop(-, v1, v2);
@@ -92,15 +121,16 @@ static lua_Integer intarith (lua_State *L, int op, lua_Integer v1,
     case LUA_OPBAND: return intop(&, v1, v2);
     case LUA_OPBOR: return intop(|, v1, v2);
     case LUA_OPBXOR: return intop(^, v1, v2);
-    case LUA_OPSHL: return luaV_shiftl(v1, v2);
-    case LUA_OPSHR: return luaV_shiftl(v1, -v2);
+    case LUA_OPSHL: return luaV_shiftl(v1, v2);   // 左移
+    case LUA_OPSHR: return luaV_shiftl(v1, -v2);  // 右移
     case LUA_OPUNM: return intop(-, 0, v1);
-    case LUA_OPBNOT: return intop(^, ~l_castS2U(0), v1);
+    case LUA_OPBNOT: return intop(^, ~l_castS2U(0), v1);  // 与全1进行 异或 实现按位取反
     default: lua_assert(0); return 0;
   }
 }
 
 
+// 关于数字的算术运算
 static lua_Number numarith (lua_State *L, int op, lua_Number v1,
                                                   lua_Number v2) {
   switch (op) {
@@ -109,7 +139,7 @@ static lua_Number numarith (lua_State *L, int op, lua_Number v1,
     case LUA_OPMUL: return luai_nummul(L, v1, v2);
     case LUA_OPDIV: return luai_numdiv(L, v1, v2);
     case LUA_OPPOW: return luai_numpow(L, v1, v2);
-    case LUA_OPIDIV: return luai_numidiv(L, v1, v2);
+    case LUA_OPIDIV: return luai_numidiv(L, v1, v2); // 整除的实现是 floor(v1/v2)
     case LUA_OPUNM: return luai_numunm(L, v1);
     case LUA_OPMOD: {
       lua_Number m;

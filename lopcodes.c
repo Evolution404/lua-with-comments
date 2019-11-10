@@ -17,6 +17,7 @@
 
 /* ORDER OP */
 
+// 记录了所有的指令的名称
 LUAI_DDEF const char *const luaP_opnames[NUM_OPCODES+1] = {
   "MOVE",
   "LOADK",

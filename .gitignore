@@ -5,3 +5,4 @@ luac
 test*
 *.lua
 tags
+.root

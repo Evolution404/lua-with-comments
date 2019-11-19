@@ -8,6 +8,24 @@
 #ifndef lobject_h
 #define lobject_h
 
+/*
+  LUA_TNIL              空类型
+  LUA_TBOOLEAN          布尔型
+  LUA_TLIGHTUSERDATA    轻量级用户类型
+  LUA_TNUMBER           数字类型
+    LUA_TNUMFLT           浮点数
+    LUA_TNUMINT           整数
+  LUA_TSTRING           字符串类型
+    LUA_TSHRSTR           短字符串
+    LUA_TLNGSTR           长字符串
+  LUA_TTABLE            表类型
+  LUA_TFUNCTION         函数类型
+    LUA_TLCL              lua 必包
+    LUA_TLCF              轻量级c函数
+    LUA_TCCL              c必包
+  LUA_TUSERDATA         用户数据类型
+  LUA_TTHREAD           线程类型
+*/
 
 
 
@@ -406,7 +424,7 @@ typedef union UTString {
 #define svalue(o)       getstr(tsvalue(o))
 
 /* get string length from 'TString *s' */
-// 从TSvalue获取字符串长度
+// 从TString获取字符串长度
 #define tsslen(s)	((s)->tt == LUA_TSHRSTR ? (s)->shrlen : (s)->u.lnglen)
 
 /* get string length from 'TValue *o' */
@@ -482,41 +500,77 @@ typedef struct Upvaldesc {
 */
 // 局部变量的描述信息
 typedef struct LocVar {
-  TString *varname;
+  TString *varname; // 变量名称
   // start和end指定了变量的作用域
-  int startpc;  /* first point where variable is active */
-  int endpc;    /* first point where variable is dead */
+  int startpc;  /* first point where variable is active 变量作用域开始位置 */
+  int endpc;    /* first point where variable is dead   变量作用域结束位置 */
 } LocVar;
 
 
 /*
 ** Function Prototypes
 */
+
+/*
+typedef struct Proto{
+  CommonHeader;
+  
+  // 1 函数原型信息
+  lu_byte numparams;      // 函数参数个数
+  lu_byte is_vararg;      // 是否有变长参数 1说明最后一个参数是可变参数
+  lu_byte maxstacksize;   // 最大的函数栈长度 也就是最多占用的数据栈个数
+
+  // 2 常量
+  int sizek;              // 常量的个数
+  TValue* k;              // 常量表
+  
+  // 3 局部变量
+  int sizelocvars;        // 局部变量的个数
+  LocVar* locvars;        // 局部变量数组
+
+  // 4 闭包变量
+  int sizeupvalues;       // 闭包变量的个数
+  Upvaldesc* upvalues;    // 闭包变量数组
+
+  // 5 子函数(嵌套)的Propo
+  int sizep;              // 子函数的Propo数组长度
+  struct Proto** p;       // 子函数的Propo数组
+  struct LClosure* cache; // 缓存子函数的Propo数组
+
+  // 6 该函数的指令
+  int sizecode;           // 指令的个数(指令数组的长度)
+  Instruction* code;      // 指令数组
+
+  // 7 行信息 用于调试
+  int sizelineinfo;       // 行信息数组长度
+  int* lineinfo;          // 行信息数组
+
+  // 8 源码信息
+  int linedefined;        // 函数起始行
+  int lastlinedefined;    // 函数结束行
+  TString* source;        // 函数源码
+
+  // 9 垃圾回收使用
+  GCObject* gclist;
+}Proto;
+ */
+
 // 函数原型
 typedef struct Proto {
   CommonHeader;
-  // 函数的固定参数的个数
   lu_byte numparams;  /* number of fixed parameters */
-  // 该函数是否支持可变参数, 如果是1 说明最后一个参数是可变参数
   lu_byte is_vararg;
-  // 该函数最多使用几个寄存器
   lu_byte maxstacksize;  /* number of registers needed by this function */
   int sizeupvalues;  /* size of 'upvalues' */
-  // 常量的个数
   int sizek;  /* size of 'k' */
-  // 该函数中指令的条数
   int sizecode;
   int sizelineinfo;
-  // 该函数的子函数个数
   int sizep;  /* size of 'p' */
   int sizelocvars;
   int linedefined;  /* debug information  */
   int lastlinedefined;  /* debug information  */
-  // 该函数使用的常量表
   TValue *k;  /* constants used by the function */
-  // 解析该函数后的指令都被存到code项里面
   Instruction *code;  /* opcodes */
-  // 子函数表
   struct Proto **p;  /* functions defined inside the function */
   int *lineinfo;  /* map from opcodes to source lines (debug information) */
   LocVar *locvars;  /* information about local variables (debug information) */
@@ -629,7 +683,8 @@ typedef struct Node {
 typedef struct Table {
   CommonHeader;
   // flags 字段是一个 byte 类型，用于表示在这个表中提供了哪些元方法,默认为0；
-  // 当查找过至少一次以后，如果该表中存在某个元方法，那么就将该元方法对应的 flag 位置为1,这样下一次查找时只需要判断该位即可。所有的元方法映射的bit TMS 中
+  // 当查找过至少一次以后，如果该表中存在某个元方法，那么就将该元方法对应的 flag 位置为1,这样下一次查找时只需要判断该位即可
+  // 所有的元方法映射的bit在 TMS 中
   lu_byte flags;  /* 1<<p means tagmethod(p) is not present */
   // lsizenode 字段是该表Hash桶大小的log2值,Hash桶数组大小一定是2的次方,当扩展Hash桶的时候每次需要乘以2。
   lu_byte lsizenode;  /* log2 of size of 'node' array */
@@ -673,6 +728,7 @@ typedef struct Table {
 LUAI_DDEC const TValue luaO_nilobject_;
 
 /* size of buffer for 'luaO_utf8esc' function */
+// 设置luaO_utf8esc函数缓存区的大小
 #define UTF8BUFFSZ	8
 
 LUAI_FUNC int luaO_int2fb (unsigned int x);

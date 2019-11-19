@@ -116,6 +116,8 @@ const char *luaT_objtypename (lua_State *L, const TValue *o) {
 }
 
 
+// f是调用函数 p1 p2 是参数 p3可以是返回值也可能是第三个参数
+// hasres标记p3是返回值还是参数
 void luaT_callTM (lua_State *L, const TValue *f, const TValue *p1,
                   const TValue *p2, TValue *p3, int hasres) {
   ptrdiff_t result = savestack(L, p3);
@@ -127,28 +129,33 @@ void luaT_callTM (lua_State *L, const TValue *f, const TValue *p1,
   if (!hasres)  /* no result? 'p3' is third argument */
     setobj2s(L, L->top++, p3);  /* 3rd argument */
   /* metamethod may yield only when called from Lua code */
-  if (isLua(L->ci))
+  // 实际调用函数
+  if (isLua(L->ci)) // lua函数可能yield
     luaD_call(L, func, hasres);
-  else
+  else // c函数不可能yield
     luaD_callnoyield(L, func, hasres);
-  if (hasres) {  /* if has result, move it to its place */
+  if (hasres) {  /* if has result, move it to its place 设置返回值 */
     p3 = restorestack(L, result);
     setobjs2s(L, p3, --L->top);
   }
 }
 
 
+// 在p1和p2之间调用元方法
+// p1和p2都找不到元方法返回0 调用成功返回1
+// 这个函数只有ltm模块内部使用
 int luaT_callbinTM (lua_State *L, const TValue *p1, const TValue *p2,
                     StkId res, TMS event) {
-  const TValue *tm = luaT_gettmbyobj(L, p1, event);  /* try first operand */
+  const TValue *tm = luaT_gettmbyobj(L, p1, event);  /* try first operand 先从第一个操作数取元方法 */
   if (ttisnil(tm))
-    tm = luaT_gettmbyobj(L, p2, event);  /* try second operand */
+    tm = luaT_gettmbyobj(L, p2, event);  /* try second operand 第一个操作数没有从第二个操作数取元方法 */
   if (ttisnil(tm)) return 0;
-  luaT_callTM(L, tm, p1, p2, res, 1);
+  luaT_callTM(L, tm, p1, p2, res, 1);  // 调用元方法 且有返回值
   return 1;
 }
 
 
+// 在p1和p2之间调用元方法 并且进行错误处理
 void luaT_trybinTM (lua_State *L, const TValue *p1, const TValue *p2,
                     StkId res, TMS event) {
   if (!luaT_callbinTM(L, p1, p2, res, event)) {
@@ -156,10 +163,11 @@ void luaT_trybinTM (lua_State *L, const TValue *p1, const TValue *p2,
       case TM_CONCAT:
         luaG_concaterror(L, p1, p2);
       /* call never returns, but to avoid warnings: *//* FALLTHROUGH */
+      // 位运算只能针对两者都是整数
       case TM_BAND: case TM_BOR: case TM_BXOR:
       case TM_SHL: case TM_SHR: case TM_BNOT: {
         lua_Number dummy;
-        if (tonumber(p1, &dummy) && tonumber(p2, &dummy))
+        if (tonumber(p1, &dummy) && tonumber(p2, &dummy)) // 都是数字类型 但不都是整数
           luaG_tointerror(L, p1, p2);
         else
           luaG_opinterror(L, p1, p2, "perform bitwise operation on");
@@ -172,6 +180,7 @@ void luaT_trybinTM (lua_State *L, const TValue *p1, const TValue *p2,
 }
 
 
+// 在p1和p2之间调用元方法 将结果放入top中
 int luaT_callorderTM (lua_State *L, const TValue *p1, const TValue *p2,
                       TMS event) {
   if (!luaT_callbinTM(L, p1, p2, L->top, event))

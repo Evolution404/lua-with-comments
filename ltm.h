@@ -17,30 +17,30 @@
 */
 // 所有的标签方法
 typedef enum {
-  TM_INDEX,     // 用于查询不存在的key
-  TM_NEWINDEX,  // 用于设置不存在的key 在给不存在的key赋值时会调用
-  TM_GC,
-  TM_MODE,
-  TM_LEN,
-  TM_EQ,  /* last tag method with fast access */
-  TM_ADD,
-  TM_SUB,
-  TM_MUL,
-  TM_MOD,
-  TM_POW,
-  TM_DIV,
-  TM_IDIV,
-  TM_BAND,
-  TM_BOR,
-  TM_BXOR,
-  TM_SHL,
-  TM_SHR,
-  TM_UNM,
-  TM_BNOT,
-  TM_LT,
-  TM_LE,
-  TM_CONCAT,
-  TM_CALL,
+  TM_INDEX,    // 用于查询不存在的key
+  TM_NEWINDEX, // 用于设置不存在的key 在给不存在的key赋值时会调用
+  TM_GC,       // 对象被gc时调用
+  TM_MODE,     // 弱表属性
+  TM_LEN,      // #(取长度)操作
+  TM_EQ,       // ==(等于)操作 last tag method with fast access 快速访问的最后一个元方法
+  TM_ADD,      // +操作, 任何不是数字值(不包括能转换成数字的字符串)进行加法会尝试调用元方法
+  TM_SUB,      // -操作, 与add类似
+  TM_MUL,      // *操作
+  TM_MOD,      // %操作
+  TM_POW,      // ^(次方)操作
+  TM_DIV,      // /操作
+  TM_IDIV,     // //整除操作
+  TM_BAND,     // &(按位与)操作
+  TM_BOR,      // |(按位或)操作
+  TM_BXOR,     // ~(按位异或)操作
+  TM_SHL,      // <<(左移)操作
+  TM_SHR,      // >>(右移)操作
+  TM_UNM,      // -(取负)操作
+  TM_BNOT,     // ~(按位非)操作
+  TM_LT,       // <(小于)操作
+  TM_LE,       // <=(小于等于)操作
+  TM_CONCAT,   // ..(连接)操作
+  TM_CALL,     // 函数调用操作
   TM_N		/* number of elements in the enum */
 } TMS;
 

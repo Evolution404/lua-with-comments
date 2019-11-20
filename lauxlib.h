@@ -28,9 +28,10 @@
 #define LUA_PRELOAD_TABLE	"_PRELOAD"
 
 
+// 描述模块的结构体
 typedef struct luaL_Reg {
-  const char *name;
-  lua_CFunction func;
+  const char *name;   // 模块名
+  lua_CFunction func; // 模块初始化函数
 } luaL_Reg;
 
 

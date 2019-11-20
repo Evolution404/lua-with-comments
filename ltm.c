@@ -117,11 +117,14 @@ const char *luaT_objtypename (lua_State *L, const TValue *o) {
 
 
 // f是调用函数 p1 p2 是参数 p3可以是返回值也可能是第三个参数
+// 例如__index是函数那么调用时会传入table,key两个参数
+//     __newindex是函数那么调用时会传入table,key,val三个参数 就没有返回值
 // hasres标记p3是返回值还是参数
 void luaT_callTM (lua_State *L, const TValue *f, const TValue *p1,
                   const TValue *p2, TValue *p3, int hasres) {
-  ptrdiff_t result = savestack(L, p3);
+  ptrdiff_t result = savestack(L, p3);  // p3与L->stack的相对位置
   StkId func = L->top;
+  // 将函数和参数压入栈中
   setobj2s(L, func, f);  /* push function (assume EXTRA_STACK) */
   setobj2s(L, func + 1, p1);  /* 1st argument */
   setobj2s(L, func + 2, p2);  /* 2nd argument */
@@ -135,7 +138,8 @@ void luaT_callTM (lua_State *L, const TValue *f, const TValue *p1,
   else // c函数不可能yield
     luaD_callnoyield(L, func, hasres);
   if (hasres) {  /* if has result, move it to its place 设置返回值 */
-    p3 = restorestack(L, result);
+    // 调用函数之后由于栈的大小会变动所以栈的实际内存地址也会变动 只有记录相对位置才有意义
+    p3 = restorestack(L, result);  // 根据相对位置恢复p3
     setobjs2s(L, p3, --L->top);
   }
 }

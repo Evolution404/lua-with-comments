@@ -39,6 +39,9 @@
 ** these libs are loaded by lua.c and are readily available to any Lua
 ** program
 */
+// 初始化要加载的模块
+// 这里模块都被加载成全局变量 挂载到_G表下
+// 例如访问math模块就在_G.math下, base模块名称是_G所以直接暴露出来不需要模块名
 static const luaL_Reg loadedlibs[] = {
   {"_G", luaopen_base},
   {LUA_LOADLIBNAME, luaopen_package},
@@ -57,6 +60,7 @@ static const luaL_Reg loadedlibs[] = {
 };
 
 
+// 遍历loadedlibs加载所有模块
 LUALIB_API void luaL_openlibs (lua_State *L) {
   const luaL_Reg *lib;
   /* "require" functions from 'loadedlibs' and set results to global table */

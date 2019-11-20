@@ -1,6 +1,7 @@
 /*
 ** $Id: lauxlib.c,v 1.289 2016/12/20 18:37:00 roberto Exp $
 ** Auxiliary functions for building Lua libraries
+** 构建Lua库的辅助函数
 ** See Copyright Notice in lua.h
 */
 
@@ -633,14 +634,15 @@ LUALIB_API void luaL_unref (lua_State *L, int t, int ref) {
 */
 
 typedef struct LoadF {
-  int n;  /* number of pre-read characters */
-  FILE *f;  /* file being read */
-  // 关于BUFSIZ, 是系统的默认输出缓存大小
+  int n;  /* number of pre-read characters 预读取的字节数 */
+  FILE *f;  /* file being read 要加载读取的文件的文件描述符 */
+  // 关于BUFSIZ, 是系统的默认输出缓存大小 输出是1024 ubuntu输出是8192
   // 这里直接利用系统的缓存大小作为文件读取的缓存大小
   char buff[BUFSIZ];  /* area for reading file */
 } LoadF;
 
 
+// 传入LoadF对象 如果有预读取内容返回内容 否则使用fread读取后返回
 static const char *getF (lua_State *L, void *ud, size_t *size) {
   LoadF *lf = (LoadF *)ud;
   (void)L;  /* not used */
@@ -669,6 +671,9 @@ static int errfile (lua_State *L, const char *what, int fnameindex) {
 
 
 // BOM——Byte Order Mark，就是字节序标记
+// 有BOM 返回BOM后第一个字符
+// 无BOM 返回文件第一个字符
+// 如果文件头有不足三个字节和BOM一样 读取的字节被放入lf->buff lf->n说明读取的字节数
 static int skipBOM (LoadF *lf) {
   const char *p = "\xEF\xBB\xBF";  /* UTF-8 BOM mark */
   int c;
@@ -691,6 +696,8 @@ static int skipBOM (LoadF *lf) {
 ** first "valid" character of the file (after the optional BOM and
 ** a first-line comment).
 */
+// 跳过BOM和第一行注释 让cp指向第一个有效字符
+// Windows有可能有BOM头 linux可以直接 ./a.lua 运行应该跳过第一行Shebang
 static int skipcomment (LoadF *lf, int *cp) {
   // c是文件的第一个有效字符, 即去除BOM后的第一个字符
   int c = *cp = skipBOM(lf);
@@ -707,36 +714,29 @@ static int skipcomment (LoadF *lf, int *cp) {
 
 LUALIB_API int luaL_loadfilex (lua_State *L, const char *filename,
                                              const char *mode) {
-  // LoadF 的定义如下
-  // int n;  /* number of pre-read characters */
-  // FILE *f;  /* file being read */
-  // char buff[BUFSIZ];  /* area for reading file */
   LoadF lf;
   int status, readstatus;
   int c;
   int fnameindex = lua_gettop(L) + 1;  /* index of filename on the stack */
-  // 往L栈中最后压入压入一个字符串
-  // 没有文件名是 "=stdin"
-  // 有文件名就是filename
-  if (filename == NULL) {
+  if (filename == NULL) { // 如果没有文件名 从stdin中读取
     lua_pushliteral(L, "=stdin");
     lf.f = stdin;
   }
   else {
     lua_pushfstring(L, "@%s", filename);
     lf.f = fopen(filename, "r");
-    if (lf.f == NULL) return errfile(L, "open", fnameindex);
+    if (lf.f == NULL) return errfile(L, "open", fnameindex); // 打开文件失败
   }
-  if (skipcomment(&lf, &c))  /* read initial portion */
-    lf.buff[lf.n++] = '\n';  /* add line to correct line numbers */
-  // 预处理过后的二进制文件
-  if (c == LUA_SIGNATURE[0] && filename) {  /* binary file? */
+  if (skipcomment(&lf, &c))  /* read initial portion 处理BOM头和Shebang */
+    lf.buff[lf.n++] = '\n';  /* add line to correct line numbers 如果跳过了Shebang行数会不对 所以加一个\n空行 */
+  // luac -o a a.lua 可以生成字节码文件
+  if (c == LUA_SIGNATURE[0] && filename) {  /* binary file? 文件是预处理过的二进制文件? */
     lf.f = freopen(filename, "rb", lf.f);  /* reopen in binary mode */
     if (lf.f == NULL) return errfile(L, "reopen", fnameindex);
     skipcomment(&lf, &c);  /* re-read initial portion */
   }
   if (c != EOF)
-    lf.buff[lf.n++] = c;  /* 'c' is the first character of the stream */
+    lf.buff[lf.n++] = c;  /* 'c' is the first character of the stream 将c放入预读取缓存中 */
   // 给lua_load传入的chunkname就是刚才压入的 "filename" 或者 "=stdin"
   status = lua_load(L, getF, &lf, lua_tostring(L, -1), mode);
   readstatus = ferror(lf.f);
@@ -784,13 +784,17 @@ LUALIB_API int luaL_loadstring (lua_State *L, const char *s) {
 
 
 
+// 查询obj的元表中的event项
+// 查询成功 返回查询结果的类型 栈顶为obj的元表的event项
+// 查询失败 返回LUA_TNIL 栈没有变化
 LUALIB_API int luaL_getmetafield (lua_State *L, int obj, const char *event) {
-  if (!lua_getmetatable(L, obj))  /* no metatable? */
-    return LUA_TNIL;
-  else {
+  if (!lua_getmetatable(L, obj))  /* no metatable? 没有元表 */
+    return LUA_TNIL;  // 返回类型NIL
+  else {  // 有元表 此时栈顶已经是obj的元表了
     int tt;
-    lua_pushstring(L, event);
-    tt = lua_rawget(L, -2);
+    lua_pushstring(L, event);  // 栈顶放入event
+    // rawget会覆盖栈顶的值
+    tt = lua_rawget(L, -2);  // 在元表上查询event对应值  现在栈顶是 元表 元表[event]
     if (tt == LUA_TNIL)  /* is metafield nil? */
       lua_pop(L, 2);  /* remove metatable and metafield */
     else
@@ -800,12 +804,16 @@ LUALIB_API int luaL_getmetafield (lua_State *L, int obj, const char *event) {
 }
 
 
+// 调用obj的元表的event项代表的函数
+// 返回1 调用成功 栈顶是调用返回值
+// 返回0 调用失败 没有栈操作
 LUALIB_API int luaL_callmeta (lua_State *L, int obj, const char *event) {
   obj = lua_absindex(L, obj);
   if (luaL_getmetafield(L, obj, event) == LUA_TNIL)  /* no metafield? */
-    return 0;
-  lua_pushvalue(L, obj);
-  lua_call(L, 1, 1);
+    return 0;  // 查询元表项为空
+  // 现在栈顶是元表项
+  lua_pushvalue(L, obj);  // 栈顶压入obj
+  lua_call(L, 1, 1);  // 调用函数
   return 1;
 }
 
@@ -822,14 +830,28 @@ LUALIB_API lua_Integer luaL_len (lua_State *L, int idx) {
 }
 
 
+// 将不同类型的值转换成字符串 放入栈顶
+// 转换规则如下
+// 1. 查询该数据的元表的__tostring项,存在则调用该函数
+//    如果返回值是字符串那么最终就返回这个字符串
+// 2. 上述执行失败 区分idx位置的数据类型
+//    数字类型: 转换成字符串压入栈顶
+//    字符串类型: 压入栈顶
+//    布尔类型: 转换成true,false 压入栈顶
+//    nil: 转换成nil 压入栈顶
+//    其他情况: 格式为"%s: %p" 压入栈顶
+//      %s部分: 元表__name项(是字符串)或者该对象的类型名
+//      %p部分: 该对象存储实际数据的地址 如表类型就是Table的地址
 LUALIB_API const char *luaL_tolstring (lua_State *L, int idx, size_t *len) {
-  if (luaL_callmeta(L, idx, "__tostring")) {  /* metafield? */
+  if (luaL_callmeta(L, idx, "__tostring")) {  /* metafield? 调用__tostring函数 */
+    // 调用成功 栈顶是tostring函数的返回值
     if (!lua_isstring(L, -1))
       luaL_error(L, "'__tostring' must return a string");
   }
   else {
+    // 调用失败
     switch (lua_type(L, idx)) {
-      case LUA_TNUMBER: {
+      case LUA_TNUMBER: {  // 处理数字类型
         if (lua_isinteger(L, idx))
           lua_pushfstring(L, "%I", (LUAI_UACINT)lua_tointeger(L, idx));
         else
@@ -842,20 +864,24 @@ LUALIB_API const char *luaL_tolstring (lua_State *L, int idx, size_t *len) {
       case LUA_TBOOLEAN:
         lua_pushstring(L, (lua_toboolean(L, idx) ? "true" : "false"));
         break;
-      case LUA_TNIL:
+      case LUA_TNIL:  // 如果让nil打印null可以修改这里
         lua_pushliteral(L, "nil");
         break;
       default: {
         int tt = luaL_getmetafield(L, idx, "__name");  /* try name */
+        // 如果元表的__name项是字符串那么获取这个字符串 否则是有这个元素的类型
         const char *kind = (tt == LUA_TSTRING) ? lua_tostring(L, -1) :
                                                  luaL_typename(L, idx);
+        // 压入要打印的字符串 例如 "table: 0x104efb0"
+        // 要让表类型完全打印所有键值对而不是指针可以修改这里
         lua_pushfstring(L, "%s: %p", kind, lua_topointer(L, idx));
-        if (tt != LUA_TNIL)
-          lua_remove(L, -2);  /* remove '__name' */
+        if (tt != LUA_TNIL)  // luaL_getmetafield返回LUA_TNIL不会操作栈
+          lua_remove(L, -2);  /* remove '__name' 去掉栈上__name项 */
         break;
       }
     }
   }
+  // 栈顶是数字或字符串 数字进行处理后返回字符串的地址 并修改len
   return lua_tolstring(L, -1, len);
 }
 
@@ -946,16 +972,23 @@ LUALIB_API void luaL_openlib (lua_State *L, const char *libname,
 ** function gets the 'nup' elements at the top as upvalues.
 ** Returns with only the table at the stack.
 */
+// 为栈顶的表设置l数组中的键值对, 每个新增的函数都包括同样的n个upvalue
+// 执行前栈顶 t n1 n2 n3
+// 执行后栈顶 t
 LUALIB_API void luaL_setfuncs (lua_State *L, const luaL_Reg *l, int nup) {
   luaL_checkstack(L, nup, "too many upvalues");
+  // 进入函数栈顶是用来放入被加载函数的表 t 和 n个upvalue 例如 t n1 n2 n3
   for (; l->name != NULL; l++) {  /* fill the table with given functions */
     int i;
-    for (i = 0; i < nup; i++)  /* copy upvalues to the top */
+    // 原来栈顶的n个upvalue全部复制一份
+    // 例如原来栈顶是 t n1 n2 n3现在变成 t n1 n2 n3 n1 n2 n3
+    for (i = 0; i < nup; i++)  /* copy upvalues to the top 压入n个upvalues */
       lua_pushvalue(L, -nup);
-    lua_pushcclosure(L, l->func, nup);  /* closure with those upvalues */
-    lua_setfield(L, -(nup + 2), l->name);
+    // 压入闭包会清除upvalue 现在栈顶是 t n1 n2 n3 cclosure
+    lua_pushcclosure(L, l->func, nup);  /* closure with those upvalues 压入c闭包清除之前的upvalue */
+    lua_setfield(L, -(nup + 2), l->name);  // 设置t[l->name] = cclosure 栈顶是 t n1 n2 n3
   }
-  lua_pop(L, nup);  /* remove upvalues */
+  lua_pop(L, nup);  /* remove upvalues 删除upvalue 栈顶是 t */
 }
 
 
@@ -963,14 +996,18 @@ LUALIB_API void luaL_setfuncs (lua_State *L, const luaL_Reg *l, int nup) {
 ** ensure that stack[idx][fname] has a table and push that table
 ** into the stack
 */
+// t是index位置的值
+// 确保 t[fname] 的值为一个表, 并将栈顶设置为t[fname]的值
+// 如果t[fname]不是表就新建一个表并设置到fname键上, 拷贝新建的表到栈顶
 LUALIB_API int luaL_getsubtable (lua_State *L, int idx, const char *fname) {
-  if (lua_getfield(L, idx, fname) == LUA_TTABLE)
+  if (lua_getfield(L, idx, fname) == LUA_TTABLE)  // 将查询的结果压入栈顶
     return 1;  /* table already there */
   else {
-    lua_pop(L, 1);  /* remove previous result */
-    idx = lua_absindex(L, idx);
-    lua_newtable(L);
-    lua_pushvalue(L, -1);  /* copy to be left at top */
+    lua_pop(L, 1);  /* remove previous result 前面查询的结果不对 删掉 */
+    idx = lua_absindex(L, idx);  // 将负数idx转换成正数idx
+    lua_newtable(L);  // 在栈顶新建一个table
+    lua_pushvalue(L, -1);  /* copy to be left at top 拷贝一份新建的table 现在栈顶有两个一样的table */
+    // setfield会设置完成会删除栈顶 所以这里拷贝了两份 删除一份还能保留一份
     lua_setfield(L, idx, fname);  /* assign new table to field */
     return 0;  /* false, because did not find table there */
   }
@@ -983,19 +1020,25 @@ LUALIB_API int luaL_getsubtable (lua_State *L, int idx, const char *fname) {
 ** if 'glb' is true, also registers the result in the global table.
 ** Leaves resulting module on the top.
 */
+// 查询modname是否已经加载 如果没有加载就调用openf加载这个模块
+// 执行后栈顶是openf的返回值
 LUALIB_API void luaL_requiref (lua_State *L, const char *modname,
                                lua_CFunction openf, int glb) {
+  // LUA_LOADED_TABLE "__LOADED"
+  // 确保 G(L)->l_registry的 "_LOADED" 键是一个表, 执行后栈顶就是"_LOADED"对应的表
   luaL_getsubtable(L, LUA_REGISTRYINDEX, LUA_LOADED_TABLE);
-  lua_getfield(L, -1, modname);  /* LOADED[modname] */
-  if (!lua_toboolean(L, -1)) {  /* package not already loaded? */
-    lua_pop(L, 1);  /* remove field */
-    lua_pushcfunction(L, openf);
-    lua_pushstring(L, modname);  /* argument to open function */
-    lua_call(L, 1, 1);  /* call 'openf' to open module */
+  lua_getfield(L, -1, modname);  /* LOADED[modname] 查询LOADED[modname] */
+  if (!lua_toboolean(L, -1)) {  /* package not already loaded? 没有查询到该模块已经被加载 */
+    lua_pop(L, 1);  /* remove field 删除查询LOADED表的结果 */
+    lua_pushcfunction(L, openf);  // 压入打开模块的函数openf
+    lua_pushstring(L, modname);  /* argument to open function 压入模块名 */
+    lua_call(L, 1, 1);  /* call 'openf' to open module 执行openf */
     lua_pushvalue(L, -1);  /* make copy of module (call result) */
+    // 现在栈顶情况 LOADED result result  result是函数执行结果
     lua_setfield(L, -3, modname);  /* LOADED[modname] = module */
+    // 设置值后栈顶是 LOADED result
   }
-  lua_remove(L, -2);  /* remove LOADED table */
+  lua_remove(L, -2);  /* remove LOADED table 删除LOADED表 现在栈顶是result */
   if (glb) {
     lua_pushvalue(L, -1);  /* copy of module */
     lua_setglobal(L, modname);  /* _G[modname] = module */
@@ -1020,6 +1063,7 @@ LUALIB_API const char *luaL_gsub (lua_State *L, const char *s, const char *p,
 }
 
 
+// 实际的内存分配函数
 static void *l_alloc (void *ud, void *ptr, size_t osize, size_t nsize) {
   (void)ud; (void)osize;  /* not used */
   if (nsize == 0) {

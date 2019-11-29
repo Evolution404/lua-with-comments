@@ -20,9 +20,9 @@
     LUA_TLNGSTR           长字符串
   LUA_TTABLE            表类型
   LUA_TFUNCTION         函数类型
-    LUA_TLCL              lua 必包
+    LUA_TLCL              lua 闭包
     LUA_TLCF              轻量级c函数
-    LUA_TCCL              c必包
+    LUA_TCCL              c闭包
   LUA_TUSERDATA         用户数据类型
   LUA_TTHREAD           线程类型
 */
@@ -383,7 +383,7 @@ typedef TValue *StkId;  /* index to stack elements */
 */
 typedef struct TString {
   CommonHeader;
-  // 对于短字符串 用于标记是内部保留字,也就是关键字
+  // 对于短字符串 extra记录了关键字的位置从1开始 and为1 break为2 ... 顺序在luaX_tokens中
   // 是不支持自动回收的,在GC过程中会略过对这个字符串的处理 luaX_tokens
   // 对于长字符串 用于标记已经计算了哈希值
   lu_byte extra;  /* reserved words for short strings; "has hash" for longs */
@@ -443,7 +443,7 @@ typedef struct Udata {
   lu_byte ttuv_;  /* user value's tag */
   struct Table *metatable;
   size_t len;  /* number of bytes */
-  // ? 为什么不使用TValue类型 而是使用Value类型并且将类型放在外部使用ttuv_指定
+  // 实际存放数据的地方
   union Value user_;  /* user value */
 } Udata;
 
@@ -656,7 +656,7 @@ typedef struct TKey {
 typedef union TKey {
   struct {
     TValuefields;
-    int next;  /* for chaining (offset for next node) */
+    int next;  /* for chaining (offset for next node) 这个字段记录了与下一个节点的偏移量 */
   } nk;
   TValue tvk;
 } TKey;
@@ -693,6 +693,7 @@ typedef struct Table {
   // array 指向该表的数组部分的起始位置。
   TValue *array;  /* array part */
   // node 指向该表的Hash部分的起始位置。
+  // node部分使用了开放定址法实现哈希表
   Node *node;
   // lastfree 指向Lua表的Hash 部分的末尾位置。
   Node *lastfree;  /* any free position is before this position */

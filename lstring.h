@@ -31,7 +31,7 @@
 ** test whether a string is a reserved word
 */
 // 检查一个TString对象是否是关键字
-// 是短字符串且extra为0 说明是关键字
+// 是短字符串且extra不为0 说明是关键字
 #define isreserved(s)	((s)->tt == LUA_TSHRSTR && (s)->extra > 0)
 
 

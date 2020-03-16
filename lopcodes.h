@@ -159,15 +159,18 @@ enum OpMode {iABC, iABx, iAsBx, iAx};  /* basic instruction format */
 /*
 ** Macros to operate RK indices
 */
+// 常量的位置用9位标记 倒数第9位(第8位)是1说明是常量 最后8位说明位置
 
 /* this bit 1 means constant (0 means register) */
 // 一个值第8位是1说明是常量 是0说明是寄存器值
 #define BITRK		(1 << (SIZE_B - 1))  // 100000000 第8位是1
 
 /* test whether value is a constant */
+// 第8位是1说明是常量
 #define ISK(x)		((x) & BITRK)
 
 /* gets the index of the constant */
+// 去掉第8位的1 取最后面8位就是该常量在常量表的下标
 #define INDEXK(r)	((int)(r) & ~BITRK)
 
 #if !defined(MAXINDEXRK)  /* (for debugging only) */
@@ -203,6 +206,7 @@ OP_MOVE,/*	A B	R(A) := R(B)					*/
 OP_LOADK,/*	A Bx	R(A) := Kst(Bx)					*/
 OP_LOADKX,/*	A 	R(A) := Kst(extra arg)				*/
 OP_LOADBOOL,/*	A B C	R(A) := (Bool)B; if (C) pc++			*/
+// 参数B+1是设置nil的个数
 OP_LOADNIL,/*	A B	R(A), R(A+1), ..., R(A+B) := nil		*/
 OP_GETUPVAL,/*	A B	R(A) := UpValue[B]				*/
 
@@ -213,8 +217,13 @@ OP_SETTABUP,/*	A B C	UpValue[A][RK(B)] := RK(C)			*/
 OP_SETUPVAL,/*	A B	UpValue[B] := R(A)				*/
 OP_SETTABLE,/*	A B C	R(A)[RK(B)] := RK(C)				*/
 
+// 在R(A)位置新建一个表 参数B代表array部分大小 参数C代表hash部分大小
+// 参数BC的表示方法查看luaO_int2fb
 OP_NEWTABLE,/*	A B C	R(A) := {} (size = B,C)				*/
 
+// 例如语句a:b('x')
+// 开始时参数B存放表a,参数C存放字符串常量'b'
+// 执行后R(A)存放a.b函数,R(A+1)存放表a代表self变量
 OP_SELF,/*	A B C	R(A+1) := R(B); R(A) := R(B)[RK(C)]		*/
 
 OP_ADD,/*	A B C	R(A) := RK(B) + RK(C)				*/
@@ -237,6 +246,8 @@ OP_LEN,/*	A B	R(A) := length of R(B)				*/
 OP_CONCAT,/*	A B C	R(A) := R(B).. ... ..R(C)			*/
 
 OP_JMP,/*	A sBx	pc+=sBx; if (A) close all upvalues >= R(A - 1)	*/
+// OP_EQ,OP_LT,OP_LE都会紧跟一条OP_JMP指令
+// 注意是~=A,也就是(RK(B)==RK(C))==A会执行下一句的跳转语句
 OP_EQ,/*	A B C	if ((RK(B) == RK(C)) ~= A) then pc++		*/
 OP_LT,/*	A B C	if ((RK(B) <  RK(C)) ~= A) then pc++		*/
 OP_LE,/*	A B C	if ((RK(B) <= RK(C)) ~= A) then pc++		*/
@@ -244,21 +255,44 @@ OP_LE,/*	A B C	if ((RK(B) <= RK(C)) ~= A) then pc++		*/
 OP_TEST,/*	A C	if not (R(A) <=> C) then pc++			*/
 OP_TESTSET,/*	A B C	if (R(B) <=> C) then R(A) := R(B) else pc++	*/
 
+// R(A)存放被调用的函数 B=1说明没有参数 B=2或更大说明有B-1个参数且R(A+1)是base
+// B=0代表top, R(A+1)到R(top-1)都是参数 这种可能出现在前一条指令是OP_CALL或者OP_VARARG 因为参数个数不确定
+// C=1说明不保存返回值 C=2或更大保存C-1个返回值
+// C=0代表外部接收返回值个数不确定 例如a(b()) 先调用b函数 b函数的返回接收个数就不确定
 OP_CALL,/*	A B C	R(A), ... ,R(A+C-2) := R(A)(R(A+1), ... ,R(A+B-1)) */
 OP_TAILCALL,/*	A B C	return R(A)(R(A+1), ... ,R(A+B-1))		*/
+// 返回值个数是B-1,也就是B=1说明没有返回值
+// B=0说明上一条指令是OP_CALL或OP_VARARG,返回值就是从R(A)到R(top-1)
 OP_RETURN,/*	A B	return R(A), ... ,R(A+B-2)	(see note)	*/
 
+// 这是for循环的结束指令,将index+step,与limit比较,如果小于等于limit,对循环变量进行赋值,再跳转到OP_FORPREP下一条指令
 OP_FORLOOP,/*	A sBx	R(A)+=R(A+2);
 			if R(A) <?= R(A+1) then { pc+=sBx; R(A+3)=R(A) }*/
+// 这是for循环的开始指令,将index-step然后跳转到OP_FORLOOP
 OP_FORPREP,/*	A sBx	R(A)-=R(A+2); pc+=sBx				*/
 
+// 第二种for循环首先生成排放好三个变量generator,state,control
+// 前三个寄存器分别是generator,state,control,后两个是i,v,总共占用五个寄存器
+// 该指令调用generator处函数并传入state和control,返回值设置到i和v
 OP_TFORCALL,/*	A C	R(A+3), ... ,R(A+2+C) := R(A)(R(A+1), R(A+2));	*/
+// 该指令判断i是否为空,不为空设置control为i并跳转回循环体
 OP_TFORLOOP,/*	A sBx	if R(A+1) ~= nil then { R(A)=R(A+1); pc += sBx }*/
 
+// FPF是'fields per flush' 由宏LFIELDS_PER_FLUSH定义 默认是50
+// 该指令用于设置R(A)位置的表的数组部分,用来初始化的值放置在R(A+1)...R(A+B)上
+// 参数B是设置的个数 参数C是设置这个表的第几块
+//   设置表是按照块来的,每个块是FPF个也就是50,如果不分块一次可能占用上万个寄存器
+//   如果指令是 0 10 1,也就是让0位置的表的1,2,3...10初始化
+//   如果指令是 0 20 4,也就是让0位置的表的151,152,153...170初始化
+// 参数B为0 代表个数不确定直接一直使用到栈顶进行初始化
+// 参数C为0 代表参数C存在下一个指令中,因为这个指令可能存不开C
 OP_SETLIST,/*	A B C	R(A)[(C-1)*FPF+i] := R(A+i), 1 <= i <= B	*/
 
+// Bx是指在外部函数的子函数表的下标
 OP_CLOSURE,/*	A Bx	R(A) := closure(KPROTO[Bx])			*/
 
+// 参数B=0,代表拷贝尽可能多的值
+// 参数B不为0,代表拷贝B-1个值
 OP_VARARG,/*	A B	R(A), R(A+1), ..., R(A+B-2) = vararg		*/
 
 OP_EXTRAARG/*	Ax	extra (larger) argument for previous opcode	*/
@@ -317,12 +351,13 @@ LUAI_DDEC const lu_byte luaP_opmodes[NUM_OPCODES];
 // 2-3位 参数C的类型
 // 4-5位 参数B的类型
 // 6位   指令是否修改了寄存器A
-// 7位   指令是否是测试指令
+// 7位   指令是否是测试指令 下一条指令一定是jump指令
 
 #define getOpMode(m)	(cast(enum OpMode, luaP_opmodes[m] & 3))         // 获取指令的类型
 #define getBMode(m)	(cast(enum OpArgMask, (luaP_opmodes[m] >> 4) & 3)) // 获取参数B的类型
 #define getCMode(m)	(cast(enum OpArgMask, (luaP_opmodes[m] >> 2) & 3)) // 获取参数C的类型
 #define testAMode(m)	(luaP_opmodes[m] & (1 << 6))                     // 检查指令是否修改A寄存器
+// 测试指令包括 OP_EQ,OP_LT,OP_LE,OP_TEST,OP_TESTSET
 #define testTMode(m)	(luaP_opmodes[m] & (1 << 7))                     // 检查指令是否是测试指令
 
 

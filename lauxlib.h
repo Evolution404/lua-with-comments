@@ -127,6 +127,7 @@ LUALIB_API void (luaL_requiref) (lua_State *L, const char *modname,
 
 #define luaL_typename(L,i)	lua_typename(L, lua_type(L,(i)))
 
+// 当luaL_loadfile返回LUA_OK也就是0的时候,执行lua_pcall
 #define luaL_dofile(L, fn) \
 	(luaL_loadfile(L, fn) || lua_pcall(L, 0, LUA_MULTRET, 0))
 
@@ -220,11 +221,13 @@ LUALIB_API void (luaL_openlib) (lua_State *L, const char *libname,
 */
 
 /* print a string */
+// 打印一个字符串,s代表字符串,l代表字符串长度
 #if !defined(lua_writestring)
 #define lua_writestring(s,l)   fwrite((s), sizeof(char), (l), stdout)
 #endif
 
 /* print a newline and flush the output */
+// 用来打印一个\n
 #if !defined(lua_writeline)
 #define lua_writeline()        (lua_writestring("\n", 1), fflush(stdout))
 #endif

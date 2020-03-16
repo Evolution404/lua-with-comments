@@ -64,8 +64,10 @@ static const luaL_Reg loadedlibs[] = {
 LUALIB_API void luaL_openlibs (lua_State *L) {
   const luaL_Reg *lib;
   /* "require" functions from 'loadedlibs' and set results to global table */
+  // 遍历上面的loadedlibs数组
   for (lib = loadedlibs; lib->func; lib++) {
     luaL_requiref(L, lib->name, lib->func, 1);
+    // luaL_requiref执行后栈顶留下了加载的module,在这里删除掉
     lua_pop(L, 1);  /* remove lib */
   }
 }

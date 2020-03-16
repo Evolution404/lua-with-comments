@@ -1,4 +1,3 @@
-// luaS s代表string模块的
 /*
 ** $Id: lstring.c,v 2.56 2015/11/23 11:32:51 roberto Exp $
 ** String table (keeps all strings handled by Lua)

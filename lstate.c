@@ -95,11 +95,13 @@ static unsigned int makeseed (lua_State *L) {
 ** set GCdebt to a new value keeping the value (totalbytes + GCdebt)
 ** invariant (and avoiding underflows in 'totalbytes')
 */
+// 设置GCdebt的只为debt,并且保证totalbytes+新GCdebt的值也保持不变
 void luaE_setdebt (global_State *g, l_mem debt) {
   l_mem tb = gettotalbytes(g);
   lua_assert(tb > 0);
   if (debt < tb - MAX_LMEM)
     debt = tb - MAX_LMEM;  /* will make 'totalbytes == MAX_LMEM' */
+  // 保证totalbytes+GCdebt结果不变
   g->totalbytes = tb - debt;
   g->GCdebt = debt;
 }
@@ -119,10 +121,13 @@ CallInfo *luaE_extendCI (lua_State *L) {
 /*
 ** free all CallInfo structures not in use by a thread
 */
+// 释放当前的L->ci链表,这个链表有一个空的头节点不要被释放
+// 并根据释放的CallInfo个数设置nci的值
 void luaE_freeCI (lua_State *L) {
   CallInfo *ci = L->ci;
   CallInfo *next = ci->next;
   ci->next = NULL;
+  // 这里跳过头节点
   while ((ci = next) != NULL) {
     next = ci->next;
     luaM_free(L, ci);
@@ -148,6 +153,9 @@ void luaE_shrinkCI (lua_State *L) {
 }
 
 
+// 初始化栈空间为BASIC_STACK_SIZE
+// 初始化第一个CallInfo
+// 执行后栈内存放一个nil值,ci->func指向这个nil
 static void stack_init (lua_State *L1, lua_State *L) {
   int i; CallInfo *ci;
   /* initialize stack array */
@@ -156,8 +164,10 @@ static void stack_init (lua_State *L1, lua_State *L) {
   for (i = 0; i < BASIC_STACK_SIZE; i++)
     setnilvalue(L1->stack + i);  /* erase new stack */
   L1->top = L1->stack;
+  // stack_last标记的并不是真正的最后的空间,最后还剩余EXTRA_STACK的空间备用
   L1->stack_last = L1->stack + L1->stacksize - EXTRA_STACK;
   /* initialize first ci */
+  // 初始化base_ci
   ci = &L1->base_ci;
   ci->next = ci->previous = NULL;
   ci->callstatus = 0;
@@ -168,11 +178,14 @@ static void stack_init (lua_State *L1, lua_State *L) {
 }
 
 
+// 释放CallInfo链表以及lua栈
 static void freestack (lua_State *L) {
   if (L->stack == NULL)
     return;  /* stack not completely built yet */
+  // 因为释放整个CallInfo链表,先设置L->ci为base_ci,使得从头开始释放
   L->ci = &L->base_ci;  /* free the entire 'ci' list */
   luaE_freeCI(L);
+  // 从头开始释放后nci应该为0了
   lua_assert(L->nci == 0);
   luaM_freearray(L, L->stack, L->stacksize);  /* free stack array */
 }
@@ -181,16 +194,21 @@ static void freestack (lua_State *L) {
 /*
 ** Create registry table and its predefined values
 */
+// 初始化全局注册表
+// 初始化后就是一个数组部分为2的表 包括主线程和一个全局表(初始化为空表)
 static void init_registry (lua_State *L, global_State *g) {
   TValue temp;
   /* create registry */
   Table *registry = luaH_new(L);
   sethvalue(L, &g->l_registry, registry);
+  // 该表的数组部分长度是2
   luaH_resize(L, registry, LUA_RIDX_LAST, 0);
   /* registry[LUA_RIDX_MAINTHREAD] = L */
+  // 把这个注册表的数组部分的第一个元素赋值为主线程的状态机L
   setthvalue(L, &temp, L);  /* temp = L */
   luaH_setint(L, registry, LUA_RIDX_MAINTHREAD, &temp);
   /* registry[LUA_RIDX_GLOBALS] = table of globals */
+  // 把注册表的数组部分的第二个元素赋值为全局表, 全局表现在就是一个新建的表
   sethvalue(L, &temp, luaH_new(L));  /* temp = new table (global table) */
   luaH_setint(L, registry, LUA_RIDX_GLOBALS, &temp);
 }
@@ -200,6 +218,7 @@ static void init_registry (lua_State *L, global_State *g) {
 ** open parts of the state that may cause memory-allocation errors.
 ** ('g->version' != NULL flags that the state was completely build)
 */
+// 初始化栈,第一个CallInfo,全局注册表
 static void f_luaopen (lua_State *L, void *ud) {
   global_State *g = G(L);
   UNUSED(ud);
@@ -208,6 +227,7 @@ static void f_luaopen (lua_State *L, void *ud) {
   luaS_init(L);
   luaT_init(L);
   luaX_init(L);
+  // lua_newstate中最初设置gcrunning为0,这里修改为1
   g->gcrunning = 1;  /* allow gc */
   g->version = lua_version(NULL);
   luai_userstateopen(L);
@@ -252,6 +272,8 @@ static void close_state (lua_State *L) {
 }
 
 
+// lua_newstate是启动lua的时候调用
+// 之后再创建lua_State对象就使用lua_newthread
 LUA_API lua_State *lua_newthread (lua_State *L) {
   global_State *g = G(L);
   lua_State *L1;
@@ -282,6 +304,7 @@ LUA_API lua_State *lua_newthread (lua_State *L) {
 }
 
 
+// 释放一个线程需要,需要释放CallInfo链表以及lua栈以及它自身
 void luaE_freethread (lua_State *L, lua_State *L1) {
   LX *l = fromstate(L1);
   luaF_close(L1, L1->stack);  /* close all upvalues for this thread */
@@ -292,10 +315,12 @@ void luaE_freethread (lua_State *L, lua_State *L1) {
 }
 
 
+// 创建lua_State以及global_State
 LUA_API lua_State *lua_newstate (lua_Alloc f, void *ud) {
   int i;
   lua_State *L;
   global_State *g;
+  // 调用内存分配函数分配sizeof(LG)大小的内存空间
   LG *l = cast(LG *, (*f)(ud, NULL, LUA_TTHREAD, sizeof(LG)));
   if (l == NULL) return NULL;
   L = &l->l.l;
@@ -304,10 +329,12 @@ LUA_API lua_State *lua_newstate (lua_Alloc f, void *ud) {
   L->tt = LUA_TTHREAD;
   g->currentwhite = bitmask(WHITE0BIT);
   L->marked = luaC_white(g);
+  // 初始化lua_State
   preinit_thread(L, g);
   g->frealloc = f;
   g->ud = ud;
   g->mainthread = L;
+  // 生成随机种子
   g->seed = makeseed(L);
   g->gcrunning = 0;  /* no GC while building state */
   g->GCestimate = 0;
@@ -316,7 +343,9 @@ LUA_API lua_State *lua_newstate (lua_Alloc f, void *ud) {
   setnilvalue(&g->l_registry);
   g->panic = NULL;
   g->version = NULL;
+  // 初始的gcstate是GCSpause
   g->gcstate = GCSpause;
+  // 初始的gc类型是正常类型,不是紧急状态
   g->gckind = KGC_NORMAL;
   g->allgc = g->finobj = g->tobefnz = g->fixedgc = NULL;
   g->sweepgc = NULL;
@@ -329,6 +358,8 @@ LUA_API lua_State *lua_newstate (lua_Alloc f, void *ud) {
   g->gcpause = LUAI_GCPAUSE;
   g->gcstepmul = LUAI_GCMUL;
   for (i=0; i < LUA_NUMTAGS; i++) g->mt[i] = NULL;
+  // 调用f_luaopen初始化各种必要信息
+  // f_luaopen中设置了gcrunning为1
   if (luaD_rawrunprotected(L, f_luaopen, NULL) != LUA_OK) {
     /* memory allocation error: free partial state */
     close_state(L);

@@ -95,6 +95,7 @@ typedef struct CallInfo {
 /*
 ** Bits in CallInfo status
 */
+// CIST:CallInfo status
 #define CIST_OAH	(1<<0)	/* original value of 'allowhook' */
 #define CIST_LUA	(1<<1)	/* call is running a Lua function */
 #define CIST_HOOKED	(1<<2)	/* call is running a debug hook */
@@ -116,6 +117,96 @@ typedef struct CallInfo {
 /*
 ** 'global state', shared by all threads of this state
 */
+
+/*
+  // global_State分模块解释
+  // Version
+  const lua_Number *version;
+
+  // Hash
+  unsigned int seed;                         // 哈希表使用的随机数种子
+
+  // Registry
+  // 是一个长度为2的数组类型表
+  // 分别放了主线程和全局注册表,全局注册表其实就是_ENV变量
+  TValue l_registry;
+
+  // String table
+  stringtable strt;                          // 全局字符串表 存储所有短字符串
+  TString *strcache[STRCACHE_N][STRCACHE_M]; // 字符串缓存 新建字符串全部存入strcache中 全部初始化为MEMERRMSG
+
+  // Meta table
+  TString *tmname[TM_N];                     // 在luaT_init中初始化 设置为所有元方法的名称的数组
+  struct Table *mt[LUA_NUMTAGS];             // 存储基本类型的元表
+
+  // Thread list
+  struct lua_State *mainthread;              // 主线程
+  struct lua_State *twups;                   // thread with upvalues 带有upvalues的线程的数组
+
+  // Error Recover
+  lua_CFunction panic;                       // 全局错误处理响应点
+
+  // Memory Allocator
+  lua_Alloc frealloc;                        // lua使用的内存分配的函数 可以用户自定义
+  void *ud;                                  // 内存分配器的userdata
+
+  // GC
+  lu_mem totalbytes;
+  TString *memerrmsg;
+
+  // 没有被回收器补偿的分配字节,预估内存借债,新申请的内存超过此值,则触发GC 这个值可正可负
+  // luaM_realloc_,luaE_setdebt中修改了GCdebt
+  // 当新增分配内存时,GCdebt值将会增加,即GC需要释放的内存增加;当释放内存时,GCdebt将会减少,即GC需要释放的内存减少
+  // GCdebt大于零则意味着有需要GC释放还未释放的内存,所以会触发GC
+  l_mem  GCdebt;
+  // 单步中GC遍历的内存记录
+  lu_mem GCmemtrav;
+  // 使用中的非垃圾内存的估值(与当前内存实际分配数量大约相等)
+  lu_mem GCestimate;
+
+  // 当前使用的是white0还是white1
+  lu_byte currentwhite;
+  lu_byte gcstate;
+  lu_byte gckind;
+  lu_byte gcrunning;
+
+  int gcpause;
+  int gcstepmul;
+  unsigned int gcfinnum;
+
+  // 在任意时刻,所有gc对象都存在于以下四个链表之一
+  // 每新建一个gc对象,都将这个对象串联到allgc链表的头上
+  GCObject *allgc;   // 所有未被标记为终结的对象
+  // 如果对象元表有__gc元方法,那么它会从allgc取出,加入到finobj去
+  // luaC_checkfinalizer函数完成了从allgc到finobj的移动
+  // 并设置对象的FINALIZEDBIT标记位
+  GCObject *finobj;  // 所有被标记为终结的对象
+  // 在标记阶段,finobj中的白对象会移到tobefnz链表去,然后标记这些对象,这样当前周期不会释放这些对象
+  // 清扫完之后会进入GCScallfin阶段,在这里调用tobefnz对象的gc方法,同时把对象移回allgc链表
+  // 如果gc中使对象重新变成可到达，则对象复活过来；否则下个周期这个对象就会被正常清除。
+  GCObject *tobefnz; // 所有准备终结的对象(准备调用__gc的对象)
+  // fixedgc是那些不会被回收的对象
+  // 在新建完对象后,必须马上调用luaC_fix把对象从allgc移到fixedgc去
+  // GC的过程不会对fixedgc进行清扫
+  GCObject *fixedgc; // 不会被回收的对象
+
+  GCObject *gray;
+  // grayagain是需要原子操作标记的灰色节点
+  // 由于线程对象的引用关系变化非常频繁,就是说栈中元素一直在变化
+  // 所以就强制线程对象在原子阶段重新扫描一遍
+  GCObject *grayagain;
+
+  // 以下三个链表只在原子阶段有效
+  // 保存所有的弱值表
+  GCObject *weak;
+  // 保存弱键表
+  GCObject *ephemeron;
+  // 保存全弱表
+  GCObject *allweak;
+
+  GCObject **sweepgc;
+*/
+
 typedef struct global_State {
   lua_Alloc frealloc;  /* function to reallocate memory */
   void *ud;         /* auxiliary data to 'frealloc' */
@@ -157,6 +248,61 @@ typedef struct global_State {
 /*
 ** 'per thread' state
 */
+
+/*
+// lua_State为了内存对齐进行了重新排布
+struct lua_State {
+  CommonHeader;
+
+  // 1 
+  // l_G是Lua的全局对象 所有lua_State共用一个global_State 其中包含了很多全局字段
+  global_State *l_G;
+
+  // 2
+  // 当前thread的状态 LUA_OK 跳转查看
+  lu_byte status;
+
+  // 3 
+  // thread的运行过程就是指令不断执行的过程 oldpc就是指向最后执行的指令
+  const Instruction *oldpc;  
+
+  // 4 Data Stack(数据栈): [stack,...,top,...,stack_last], length is stacksize
+  // 数据栈相关的信息 StkId就是TValue 用于语义上的区分 数据栈实际上就是TValue的数组
+  // stack是栈底 top是当前栈顶 stack_last是为栈已经分配空间的最后位置
+  // top到stack_last是剩余空间
+  int stacksize;           // stacksize 包括EXTRA_STACK
+  StkId top;                 
+  StkId stack;               
+  StkId stack_last;        // stack_last 指向EXTRA_STACK前的最后一个位置
+  
+  // 5 Call Stack(调用栈)
+  // 与数据栈不同 调用栈是CallInfo构成的链表
+  CallInfo base_ci;        base_ci是调用栈的栈底
+  CallInfo *ci;            调用栈的栈顶 当前执行的函数  
+  
+  unsigned short nCcalls;  嵌套的C函数的个数
+  unsigned short nny;      调用栈中non-yieldable的调用个数
+
+  // 6 Up Value
+  UpVal *openupval;         将栈中所有开放的upvalue串成链表
+  struct lua_State *twups;   
+
+  // 7 Recover
+  // errorJmp是一个lua_longjmp对象组成的链表,在luaD_rawrunprotected中链接
+  struct lua_longjmp *errorJmp;  
+  ptrdiff_t errfunc;  
+
+  // 8 Hook for Debug
+  lua_Hook hook;
+  int basehookcount;
+  int hookcount;
+  lu_byte hookmask;
+  lu_byte allowhook;
+
+  // 9
+  GCObject *gclist;
+}; 
+ */
 struct lua_State {
   CommonHeader;
   unsigned short nci;  /* number of items in 'ci' list */
@@ -173,6 +319,7 @@ struct lua_State {
   struct lua_longjmp *errorJmp;  /* current error recover point */
   CallInfo base_ci;  /* CallInfo for first level (C calling Lua) */
   volatile lua_Hook hook;
+  // 在docall函数中使用msghandler作为了错误处理函数
   ptrdiff_t errfunc;  /* current error handling function (stack index) */
   int stacksize;
   int basehookcount;
@@ -190,16 +337,24 @@ struct lua_State {
 /*
 ** Union of all collectable objects (only for conversions)
 */
+// 一个所有需要回收的类型的共用体,只用于类型转换
 // GCUnion中各个项除了Closure都是以common header开始的
 // 所以在强制类型转换的时候引用common header里的项不会有问题
 // 例如TString以common header开头, 强制转换为GCUnion访问gc项与直接ts->gc是一样的
+// 所有垃圾回收类型在创建时都调用了luaC_newobj来完成对GCObject的初始化
 union GCUnion {
   GCObject gc;  /* common header */
+  // createstrobj中调用luaC_newobj
   struct TString ts;
+  // luaS_newudata中调用luaC_newobj
   struct Udata u;
+  // luaF_newCclosure,luaF_newLclosure中都调用了luaC_newobj
   union Closure cl;
+  // luaH_new中调用了luaC_newobj
   struct Table h;
+  // luaF_newproto中调用了luaC_newobj
   struct Proto p;
+  // lua_newstate中没调用luaC_newobj,但是对marked字段进行了处理
   struct lua_State th;  /* thread */
 };
 
@@ -207,6 +362,9 @@ union GCUnion {
 #define cast_u(o)	cast(union GCUnion *, (o))
 
 /* macros to convert a GCObject into a specific value */
+// 用于将GCObject转换成各种数据类型
+// 这里使用cast_u的目的可能是简化写法
+// 例如gco2ts这里使用 &((cast_u(o))->ts) 换成 cast(TString*, o) 也是完全可以的
 #define gco2ts(o)  \
 	check_exp(novariant((o)->tt) == LUA_TSTRING, &((cast_u(o))->ts))
 #define gco2u(o)  check_exp((o)->tt == LUA_TUSERDATA, &((cast_u(o))->u))
@@ -231,6 +389,7 @@ union GCUnion {
 
 
 /* actual number of total bytes allocated */
+// 实际被分配的所有内存空间
 #define gettotalbytes(g)	cast(lu_mem, (g)->totalbytes + (g)->GCdebt)
 
 LUAI_FUNC void luaE_setdebt (global_State *g, l_mem debt);

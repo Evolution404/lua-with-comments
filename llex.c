@@ -92,11 +92,11 @@ void luaX_init (lua_State *L) {
 
 // 从int类型token转换成字符串
 const char *luaX_token2str (LexState *ls, int token) {
-  if (token < FIRST_RESERVED) {  /* single-byte symbols? 判断是否是保留字 */
+  if (token < FIRST_RESERVED) {  /* single-byte symbols? 普通字符 */
     lua_assert(token == cast_uchar(token));
     return luaO_pushfstring(ls->L, "'%c'", token);
   }
-  else {
+  else {  // 保留字
     const char *s = luaX_tokens[token - FIRST_RESERVED];  // 从int转换成字符串
     if (token < TK_EOS)  /* fixed format (symbols and reserved words)? eof之前都是固定格式直接压入栈顶 */
       return luaO_pushfstring(ls->L, "'%s'", s);
@@ -141,6 +141,7 @@ l_noret luaX_syntaxerror (LexState *ls, const char *msg) {
 */
 // 创建TString对象
 // 查询ls->h表 表中key存在str那么就复用 否则以str创建key 便于下次复用
+// 换句话说这个函数能做到只要字符串一样返回的TString对象的地址就一定一样
 TString *luaX_newstring (LexState *ls, const char *str, size_t l) {
   lua_State *L = ls->L;
   TValue *o;  /* entry for 'str' */
@@ -177,7 +178,7 @@ static void inclinenumber (LexState *ls) {
 }
 
 
-// 为LexState设置输入文件 并设置初始状态
+// 初始化LexState对象,设置输入的文件
 void luaX_setinput (lua_State *L, LexState *ls, ZIO *z, TString *source,
                     int firstchar) {
   ls->t.token = 0;
@@ -597,7 +598,7 @@ static int llex (LexState *ls, SemInfo *seminfo) {
         if (lislalpha(ls->current)) {  /* identifier or reserved word? */
           // 第一位是字母或下划线之后位的是数字字母下划线
           TString *ts;
-          do {
+          do {  // 循环识别一个符号直到不是数字字母下划线
             save_and_next(ls);
           } while (lislalnum(ls->current));
           ts = luaX_newstring(ls, luaZ_buffer(ls->buff),

@@ -302,7 +302,7 @@ static void PrintCode(const Proto* f)
   int line=getfuncline(f,pc);
   printf("\t%d\t",pc+1);
   if (line>0) printf("[%d]\t",line); else printf("[-]\t");
-  printf("%-9s\t",luaP_opnames[o]);
+  printf("%-9s\t",luaP_opnames[o]);  // %-9s -代表左对齐打印 9代表最小长度不足在右边补上空格
   switch (getOpMode(o))
   {
    case iABC:

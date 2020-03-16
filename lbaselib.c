@@ -21,22 +21,23 @@
 #include "lualib.h"
 
 
+// print函数的实现
 static int luaB_print (lua_State *L) {
-  int n = lua_gettop(L);  /* number of arguments */
+  int n = lua_gettop(L);  /* number of arguments top-func-1 栈上参数的个数 */
   int i;
-  lua_getglobal(L, "tostring");
+  lua_getglobal(L, "tostring");  // _G.tostring放到栈顶
   for (i=1; i<=n; i++) {
     const char *s;
     size_t l;
-    lua_pushvalue(L, -1);  /* function to be called */
-    lua_pushvalue(L, i);   /* value to print */
-    lua_call(L, 1, 1);
-    s = lua_tolstring(L, -1, &l);  /* get result */
+    lua_pushvalue(L, -1);  /* function to be called 拷贝一份tostring */
+    lua_pushvalue(L, i);   /* value to print 压入要打印的值 */
+    lua_call(L, 1, 1);  // 调用tostring 转换第一个参数
+    s = lua_tolstring(L, -1, &l);  /* get result 处理在栈顶的tostring函数的返回值 */
     if (s == NULL)
       return luaL_error(L, "'tostring' must return a string to 'print'");
-    if (i>1) lua_writestring("\t", 1);
-    lua_writestring(s, l);
-    lua_pop(L, 1);  /* pop result */
+    if (i>1) lua_writestring("\t", 1);  // print多个变量中间使用\t分隔
+    lua_writestring(s, l);  // 打印此次处理的变量
+    lua_pop(L, 1);  /* pop result 弹出栈顶的tostring的返回值 */
   }
   lua_writeline();
   return 0;
@@ -483,16 +484,19 @@ static const luaL_Reg base_funcs[] = {
 };
 
 
+// 加载base模块
+// 初始化_G._G和_G._VERSION
 LUAMOD_API int luaopen_base (lua_State *L) {
   /* open lib into global table */
-  lua_pushglobaltable(L);
+  lua_pushglobaltable(L);  // 将_G表压入栈顶
+  // 设置_G.assert _G.collectgarbage ....就是 base_funcs数组的所有值
   luaL_setfuncs(L, base_funcs, 0);
   /* set global _G */
   lua_pushvalue(L, -1);
-  lua_setfield(L, -2, "_G");
+  lua_setfield(L, -2, "_G");  // _G._G = _G
   /* set global _VERSION */
-  lua_pushliteral(L, LUA_VERSION);
-  lua_setfield(L, -2, "_VERSION");
+  lua_pushliteral(L, LUA_VERSION);  // 栈顶压入 "Lua 5.3"
+  lua_setfield(L, -2, "_VERSION");  // _G._VERSION = "Lua 5.3"
   return 1;
 }
 

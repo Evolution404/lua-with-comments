@@ -20,6 +20,8 @@
 ** 'condmovestack' is used in heavy tests to force a stack reallocation
 ** at every check.
 */
+// 如果栈上剩余空间不足n了,就调用luaD_growstack来扩充栈上空间
+// pre和pos是调用luaD_growstack之前和之后执行的语句
 #define luaD_checkstackaux(L,n,pre,pos)  \
 	if (L->stack_last - L->top <= (n)) \
 	  { pre; luaD_growstack(L, n); pos; } else { condmovestack(L,pre,pos); }
@@ -29,6 +31,9 @@
 
 
 
+// 先调用save再调用restore
+// 在栈上指针位置被重新分配可能失效时,通过相对位置来恢复
+// 例如在checkstackp中的使用
 #define savestack(L,p)		((char *)(p) - (char *)L->stack)
 #define restorestack(L,n)	((TValue *)((char *)L->stack + (n)))
 

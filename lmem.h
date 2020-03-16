@@ -59,7 +59,7 @@
 // 直接分配s大小内存 tag没有实际意义只是为了调用处的可读性
 #define luaM_newobject(L,tag,s)	luaM_realloc_(L, NULL, tag, (s))
 
-// 在数组已经放满的情况下增长数组的大小 一般是进行翻倍
+// 在数组已经放满的情况下增长数组的大小 一般是进行翻倍,调用后数组大小最小为4
 // v要增长的数组 nelems数组中当前元素的个数 size数组当前的大小
 // t数组元素类型 limit数组大小上限 e用于错误信息
 #define luaM_growvector(L,v,nelems,size,t,limit,e) \

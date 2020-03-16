@@ -329,6 +329,7 @@
 /*
 @@ LUA_COMPAT_BITLIB controls the presence of library 'bit32'.
 */
+// 控制bit32库的存在
 #define LUA_COMPAT_BITLIB
 
 /*
@@ -418,6 +419,7 @@
 ** This macro is not on by default even in compatibility mode,
 ** because this is not really an incompatibility.
 */
+// tostring(100.0) 定义了这个宏 lua返回的结果是100 不定义时返回的是100.0
 /* #define LUA_COMPAT_FLOATSTRING */
 
 /* }================================================================== */

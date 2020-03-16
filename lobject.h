@@ -58,6 +58,7 @@
 */
 // LUA_TPROTO是额外的标记,本身不带任何值,不计算在值类型中
 #define LUA_TPROTO	LUA_NUMTAGS		/* function prototypes 函数原型*/
+// 如果一个key对应的value被设置为nil了,这个key就会被标记为LUA_TDEADKEY
 #define LUA_TDEADKEY	(LUA_NUMTAGS+1)		/* removed keys in tables 元表中删除的key */
 
 /*
@@ -123,7 +124,7 @@ typedef struct GCObject GCObject;
 ** included in other objects)
 */
 // 所有的 GCObject 都有一个相同的数据头，叫作 CommonHeader以宏形式定义出来的
-// 使用宏是源于使用上的某种便利 C 语言不支持结构的继承
+// 使用宏是源于使用上的某种便利 C语言不支持结构的继承
 // 所有的 GCObject 都用一个单向链表串了起来。每个对象都以 tt 来识别其类型。marked 域用于标记清除的工作
 #define CommonHeader	GCObject *next; lu_byte tt; lu_byte marked
 
@@ -181,7 +182,7 @@ typedef struct lua_TValue {
 #define rttype(o)	((o)->tt_)
 
 /* tag with no variants (bits 0-3) */
-// 取出变体部分 只有最后4位 即主类型
+// 去掉变体部分 只有最后4位 即主类型
 #define novariant(x)	((x) & 0x0F)
 
 /* type tag of a TValue (bits 0-3 for tags + variant bits 4-5) */
@@ -439,11 +440,13 @@ typedef union UTString {
 typedef struct Udata {
   // commonHeader中的tt 指定了类型位Udata
   CommonHeader;
-  // ttuv_ 指定Udata内部存储的用户类型的类型
+  // 关联的值类型,和下面的user_组合
   lu_byte ttuv_;  /* user value's tag */
+  // 每个userdata可以有自己的元表
   struct Table *metatable;
+  // 申请的内存块的大小
   size_t len;  /* number of bytes */
-  // 实际存放数据的地方
+  // 关联值,实际存放数据的地方
   union Value user_;  /* user value */
 } Udata;
 
@@ -485,11 +488,12 @@ typedef union UUdata {
 typedef struct Upvaldesc {
   // upvalue的名称
   TString *name;  /* upvalue name (for debug information) */
-  // 该upvalue是否在父函数栈上
+  // 该upvalue是不是父函数的局部变量
+  // 如果是父函数的局部变量说明该upvalue就在父函数的栈上
   lu_byte instack;  /* whether it is in stack (register) */
   // 索引位置信息
-  // 对于关闭的upvalue ,已经无法从栈上获取到,idx 指外层函数的upvalue 表中的索引号
-  // 对于在数据栈上的 upvalue ,序号即是变量对应的寄存器号
+  // instack为1 idx代表父函数栈上位置
+  // instack为0 idx代表父函数upval数组的下标(LClosure.upvals)
   lu_byte idx;  /* index of upvalue (in stack or in outer function's list) */
 } Upvaldesc;
 
@@ -543,12 +547,12 @@ typedef struct Proto{
 
   // 7 行信息 用于调试
   int sizelineinfo;       // 行信息数组长度
-  int* lineinfo;          // 行信息数组
+  int* lineinfo;          // 行信息数组 lineinfo[k]代表code[k]指令所在的行
 
   // 8 源码信息
   int linedefined;        // 函数起始行
   int lastlinedefined;    // 函数结束行
-  TString* source;        // 函数源码
+  TString* source;        // 保存函数所在文件文件名
 
   // 9 垃圾回收使用
   GCObject* gclist;
@@ -565,12 +569,14 @@ typedef struct Proto {
   int sizek;  /* size of 'k' */
   int sizecode;
   int sizelineinfo;
+  // 子函数数组的长度
   int sizep;  /* size of 'p' */
   int sizelocvars;
   int linedefined;  /* debug information  */
   int lastlinedefined;  /* debug information  */
   TValue *k;  /* constants used by the function */
   Instruction *code;  /* opcodes */
+  // 子函数数组
   struct Proto **p;  /* functions defined inside the function */
   int *lineinfo;  /* map from opcodes to source lines (debug information) */
   LocVar *locvars;  /* information about local variables (debug information) */
@@ -715,7 +721,7 @@ typedef struct Table {
 
 // 2的x次方
 #define twoto(x)	(1<<(x))
-// 哈希表部分桶的大小
+// 哈希表部分桶的个数
 #define sizenode(t)	(twoto((t)->lsizenode))
 
 

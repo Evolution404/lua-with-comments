@@ -69,13 +69,16 @@
 ** Try to convert a value to a float. The float case is already handled
 ** by the macro 'tonumber'.
 */
+// 负责从整数和字符串转换成浮点数 转换成功返回1 失败返回0
 int luaV_tonumber_ (const TValue *obj, lua_Number *n) {
   TValue v;
-  if (ttisinteger(obj)) {
+  if (ttisinteger(obj)) {  // 整数类型直接转换
     *n = cast_num(ivalue(obj));
     return 1;
   }
-  else if (cvt2num(obj) &&  /* string convertible to number? */
+  // cvt2num 由宏LUA_NOCVTS2N控制 定义了这个宏lua将关闭自动从字符串转换成数字
+  else if (cvt2num(obj) &&  /* string convertible to number? 字符串是否可以转换成数字 */
+            // luaO_str2num返回的是转换的字符串大小包括\0 vslen返回的是字符串长度不包括\0
             luaO_str2num(svalue(obj), &v) == vslen(obj) + 1) {
     *n = nvalue(&v);  /* convert result of 'luaO_str2num' to a float */
     return 1;
@@ -87,29 +90,33 @@ int luaV_tonumber_ (const TValue *obj, lua_Number *n) {
 
 /*
 ** try to convert a value to an integer, rounding according to 'mode':
-** mode == 0: accepts only integral values
-** mode == 1: takes the floor of the number
-** mode == 2: takes the ceil of the number
+** mode == 0: accepts only integral values  只接受整数也包括字符串类型的整数
+** mode == 1: takes the floor of the number 将浮点数向下取整
+** mode == 2: takes the ceil of the number  将浮点数向上取整
 */
+// 返回值 0转换失败 1转换成功
 int luaV_tointeger (const TValue *obj, lua_Integer *p, int mode) {
   TValue v;
  again:
-  if (ttisfloat(obj)) {
+  if (ttisfloat(obj)) {  // 传入了浮点数
     lua_Number n = fltvalue(obj);
-    lua_Number f = l_floor(n);
+    lua_Number f = l_floor(n);  // 求出floor后的值
     if (n != f) {  /* not an integral value? */
       if (mode == 0) return 0;  /* fails if mode demands integral value */
       else if (mode > 1)  /* needs ceil? */
-        f += 1;  /* convert floor to ceil (remember: n != f) */
+        f += 1;  /* convert floor to ceil (remember: n != f) mode是2代表取ceil也就是floor+1 */
     }
+    // 从double类型转换成long long类型, 转换过程还进行了范围判断
     return lua_numbertointeger(f, p);
   }
-  else if (ttisinteger(obj)) {
+  else if (ttisinteger(obj)) {  // 传入了整数
     *p = ivalue(obj);
     return 1;
   }
+  // 判断字符串能转换成浮点数
   else if (cvt2num(obj) &&
             luaO_str2num(svalue(obj), &v) == vslen(obj) + 1) {
+    // 先尝试转换成数字 跳转回again处再使用整数浮点数的处理方法
     obj = &v;
     goto again;  /* convert result from 'luaO_str2num' to an integer */
   }
@@ -132,6 +139,11 @@ int luaV_tointeger (const TValue *obj, lua_Integer *p, int mode) {
 ** the extreme case when the initial value is LUA_MININTEGER, in which
 ** case the LUA_MININTEGER limit would still run the loop once.
 */
+// lua for循环 结构
+// for var=exp1,exp2,exp3 do  
+//    <执行体>  
+// end 
+// exp1是初始值 exp2是目标值 exp3是步长 exp3可选默认为1
 static int forlimit (const TValue *obj, lua_Integer *p, lua_Integer step,
                      int *stopnow) {
   *stopnow = 0;  /* usually, let loops run */
@@ -157,20 +169,33 @@ static int forlimit (const TValue *obj, lua_Integer *p, lua_Integer step,
 ** if 'slot' is NULL, 't' is not a table; otherwise, 'slot' points to
 ** t[k] entry (which must be nil).
 */
+// 直接获取t[k]没有得到值 开始搜索元方法
+// t被查询的值 key要查询的键 val查询结果放置位置 slot用来标记t类型
+
+// slot是NULL说明t不是table slot是nil说明t[k]为nil
+// 调用这个方法传入的slot都是 luaV_fastget作用后的结果
+
+// t不是表 查询基本类型元表的__index项 设为tm
+// t是表   查询该表的元表的__index项   设为tm
+// tm是函数 调用tm
+// tm不是函数 使用fastget获取key键得值 获取到设置val
+//   获取不到 t=tm 返回第一步
 void luaV_finishget (lua_State *L, const TValue *t, TValue *key, StkId val,
                       const TValue *slot) {
   int loop;  /* counter to avoid infinite loops */
   const TValue *tm;  /* metamethod */
   for (loop = 0; loop < MAXTAGLOOP; loop++) {
-    if (slot == NULL) {  /* 't' is not a table? */
+    // 获取t的__index元方法, t是不是表类型获取方法不同
+    if (slot == NULL) {  /* 't' is not a table? slot是NULL说明t不是table */
       lua_assert(!ttistable(t));
       tm = luaT_gettmbyobj(L, t, TM_INDEX);
       if (ttisnil(tm))
         luaG_typeerror(L, t, "index");  /* no metamethod */
       /* else will try the metamethod */
     }
-    else {  /* 't' is a table */
+    else {  /* 't' is a table slot是nil说明t[k]是nil*/
       lua_assert(ttisnil(slot));
+      // hvalue(t)->metatable 是t的元表 下面用来获取元表中的元方法
       tm = fasttm(L, hvalue(t)->metatable, TM_INDEX);  /* table's metamethod */
       if (tm == NULL) {  /* no metamethod? */
         setnilvalue(val);  /* result is nil */
@@ -178,10 +203,14 @@ void luaV_finishget (lua_State *L, const TValue *t, TValue *key, StkId val,
       }
       /* else will try the metamethod */
     }
+    // __index项是一个函数 调用这个函数
     if (ttisfunction(tm)) {  /* is metamethod a function? */
+      // 调用__index函数会传入table,key两个参数 也就是t和key
+      // 传入t和key,返回值设置到val里
       luaT_callTM(L, tm, t, key, val, 1);  /* call it */
       return;
     }
+    // 获取的结果不是函数继续查询__index项
     t = tm;  /* else try to access 'tm[key]' */
     if (luaV_fastget(L,t,key,slot,luaH_get)) {  /* fast track? */
       setobj2s(L, val, slot);  /* done */
@@ -200,37 +229,43 @@ void luaV_finishget (lua_State *L, const TValue *t, TValue *key, StkId val,
 ** entry.  (The value at 'slot' must be nil, otherwise 'luaV_fastset'
 ** would have done the job.)
 */
+// t[key] = val
+// slot的意义与上面函数一致
+// 查询__newindex元方法, 如果是
 void luaV_finishset (lua_State *L, const TValue *t, TValue *key,
                      StkId val, const TValue *slot) {
   int loop;  /* counter to avoid infinite loops */
   for (loop = 0; loop < MAXTAGLOOP; loop++) {
     const TValue *tm;  /* '__newindex' metamethod */
-    if (slot != NULL) {  /* is 't' a table? */
+    // 查询__newindex元方法
+    if (slot != NULL) {  /* is 't' a table? t是表 */
       Table *h = hvalue(t);  /* save 't' table */
       lua_assert(ttisnil(slot));  /* old value must be nil */
       tm = fasttm(L, h->metatable, TM_NEWINDEX);  /* get metamethod */
+      // 没有查询到元方法那么就直接在表上创建新的key
       if (tm == NULL) {  /* no metamethod? */
-        if (slot == luaO_nilobject)  /* no previous entry? */
-          slot = luaH_newkey(L, h, key);  /* create one */
+        if (slot == luaO_nilobject)  /* no previous entry? slot必定是nil */
+          slot = luaH_newkey(L, h, key);  /* create one 返回的新Node的val字段 */
         /* no metamethod and (now) there is an entry with given key */
-        setobj2t(L, cast(TValue *, slot), val);  /* set its new value */
+        setobj2t(L, cast(TValue *, slot), val);  /* set its new value 直接往新Node上赋值 */
         invalidateTMcache(h);
         luaC_barrierback(L, h, val);
         return;
       }
       /* else will try the metamethod */
     }
-    else {  /* not a table; check metamethod */
+    else {  /* not a table; check metamethod t不是表 查询基本类型 */
       if (ttisnil(tm = luaT_gettmbyobj(L, t, TM_NEWINDEX)))
         luaG_typeerror(L, t, "index");
     }
     /* try the metamethod */
-    if (ttisfunction(tm)) {
+    if (ttisfunction(tm)) {  // __newindex字段是函数 调用这个函数
+      // __newindex传入三个参数 没有返回值
       luaT_callTM(L, tm, t, key, val, 0);
       return;
     }
     t = tm;  /* else repeat assignment over 'tm' */
-    if (luaV_fastset(L, t, key, slot, luaH_get, val))
+    if (luaV_fastset(L, t, key, slot, luaH_get, val))  // 类似get继续递归向内查询
       return;  /* done */
     /* else loop */
   }
@@ -245,6 +280,7 @@ void luaV_finishset (lua_State *L, const TValue *t, TValue *key,
 ** and it uses 'strcoll' (to respect locales) for each segments
 ** of the strings.
 */
+// 比较两个TString对象的大小
 static int l_strcmp (const TString *ls, const TString *rs) {
   const char *l = getstr(ls);
   size_t ll = tsslen(ls);
@@ -361,6 +397,8 @@ static int LEnum (const TValue *l, const TValue *r) {
 /*
 ** Main operation less than; return 'l < r'.
 */
+// 都是数字,字符串可以直接比较
+// 都是表查询元表进行比较
 int luaV_lessthan (lua_State *L, const TValue *l, const TValue *r) {
   int res;
   if (ttisnumber(l) && ttisnumber(r))  /* both operands are numbers? */
@@ -404,10 +442,15 @@ int luaV_lessequal (lua_State *L, const TValue *l, const TValue *r) {
 ** Main operation for equality of Lua values; return 't1 == t2'.
 ** L == NULL means raw equality (no metamethods)
 */
+// 比较t1和t2是否相等
+// L==NULL 直接比较不查询元表
+// L!=NULL 复杂类型还会查询元表__eq方法进行比较
 int luaV_equalobj (lua_State *L, const TValue *t1, const TValue *t2) {
   const TValue *tm;
-  if (ttype(t1) != ttype(t2)) {  /* not the same variant? */
-    if (ttnov(t1) != ttnov(t2) || ttnov(t1) != LUA_TNUMBER)
+  if (ttype(t1) != ttype(t2)) {  /* not the same variant? 两个数据不是完全一样的类型 */
+    // 四种可能 1:t1t2是数字 2:t1是数字t2不是 3:t1不是数字t2是数字 4:t1t2不是数字
+    // 2和3主类型不同 4则t1不是数字 所以只剩1 t1t2都是数字
+    if (ttnov(t1) != ttnov(t2) || ttnov(t1) != LUA_TNUMBER)  // 两者主类型不一样 或 t1不是数字类型
       return 0;  /* only numbers can be equal with different variants */
     else {  /* two numbers with different variants */
       lua_Integer i1, i2;  /* compare them as integers */
@@ -415,6 +458,7 @@ int luaV_equalobj (lua_State *L, const TValue *t1, const TValue *t2) {
     }
   }
   /* values have same type and same variant */
+  // t1和t2的类型完全一致
   switch (ttype(t1)) {
     case LUA_TNIL: return 1;
     case LUA_TNUMINT: return (ivalue(t1) == ivalue(t2));
@@ -424,7 +468,7 @@ int luaV_equalobj (lua_State *L, const TValue *t1, const TValue *t2) {
     case LUA_TLCF: return fvalue(t1) == fvalue(t2);
     case LUA_TSHRSTR: return eqshrstr(tsvalue(t1), tsvalue(t2));
     case LUA_TLNGSTR: return luaS_eqlngstr(tsvalue(t1), tsvalue(t2));
-    case LUA_TUSERDATA: {
+    case LUA_TUSERDATA: {  // 需要查询元表
       if (uvalue(t1) == uvalue(t2)) return 1;
       else if (L == NULL) return 0;
       tm = fasttm(L, uvalue(t1)->metatable, TM_EQ);
@@ -432,7 +476,7 @@ int luaV_equalobj (lua_State *L, const TValue *t1, const TValue *t2) {
         tm = fasttm(L, uvalue(t2)->metatable, TM_EQ);
       break;  /* will try TM */
     }
-    case LUA_TTABLE: {
+    case LUA_TTABLE: {  // 需要查询元表
       if (hvalue(t1) == hvalue(t2)) return 1;
       else if (L == NULL) return 0;
       tm = fasttm(L, hvalue(t1)->metatable, TM_EQ);
@@ -445,18 +489,21 @@ int luaV_equalobj (lua_State *L, const TValue *t1, const TValue *t2) {
   }
   if (tm == NULL)  /* no TM? */
     return 0;  /* objects are different */
+  // 调用元方法进行比较 比较结果放入top 不是top-1 因为这个结果函数返回后就不用了
   luaT_callTM(L, tm, t1, t2, L->top, 1);  /* call TM */
   return !l_isfalse(L->top);
 }
 
 
 /* macro used by 'luaV_concat' to ensure that element at 'o' is a string */
+// 确保o一定是一个字符串 如果不是字符串也会转换成字符串
 #define tostring(L,o)  \
 	(ttisstring(o) || (cvt2str(o) && (luaO_tostring(L, o), 1)))
 
 #define isemptystr(o)	(ttisshrstring(o) && tsvalue(o)->shrlen == 0)
 
 /* copy strings in stack from top - n up to top - 1 to buffer */
+// 拷贝 top-1 top-2 ... top-n位置的字符串到buff里
 static void copy2buff (StkId top, int n, char *buff) {
   size_t tl = 0;  /* size already copied */
   do {
@@ -471,42 +518,50 @@ static void copy2buff (StkId top, int n, char *buff) {
 ** Main operation for concatenation: concat 'total' values in the stack,
 ** from 'L->top - total' up to 'L->top - 1'.
 */
+// 将 top-1 top-2 ... top-total上的字符串进行合并
+// 执行完毕新的top-1就放着合并后的结果
 void luaV_concat (lua_State *L, int total) {
   lua_assert(total >= 2);
   do {
     StkId top = L->top;
     int n = 2;  /* number of elements handled in this pass (at least 2) */
-    if (!(ttisstring(top-2) || cvt2str(top-2)) || !tostring(L, top-1))
+    if (!(ttisstring(top-2) || cvt2str(top-2)) || !tostring(L, top-1))  // 运算的两个值有一个不是字符串类型
       luaT_trybinTM(L, top-2, top-1, top-2, TM_CONCAT);
+    // 运算结果放在 top-2 的位置
     else if (isemptystr(top - 1))  /* second operand is empty? */
-      cast_void(tostring(L, top - 2));  /* result is first operand */
+      cast_void(tostring(L, top - 2));  /* result is first operand top-1是空结果就是top-2 */
     else if (isemptystr(top - 2)) {  /* first operand is an empty string? */
-      setobjs2s(L, top - 2, top - 1);  /* result is second op. */
+      setobjs2s(L, top - 2, top - 1);  /* result is second op. top-2是空结果是top-1 拷贝到top-2位置 */
     }
     else {
+      // 连接两个字符串类型
       /* at least two non-empty string values; get as many as possible */
-      size_t tl = vslen(top - 1);
+      size_t tl = vslen(top - 1);  // tl最开始等于top-1字符串的长度
       TString *ts;
       /* collect total length and number of strings */
+      // 从top-1在栈上不断向前搜索 计算合并所有字符串后的长度tl(total len)
       for (n = 1; n < total && tostring(L, top - n - 1); n++) {
         size_t l = vslen(top - n - 1);
         if (l >= (MAX_SIZE/sizeof(char)) - tl)
           luaG_runerror(L, "string length overflow");
         tl += l;
       }
-      if (tl <= LUAI_MAXSHORTLEN) {  /* is result a short string? */
+      if (tl <= LUAI_MAXSHORTLEN) {  /* is result a short string? 这是一个短字符串 */
         char buff[LUAI_MAXSHORTLEN];
-        copy2buff(top, n, buff);  /* copy strings to buffer */
-        ts = luaS_newlstr(L, buff, tl);
+        copy2buff(top, n, buff);  /* copy strings to buffer 把这几个字符串拷贝到buff里 */
+        ts = luaS_newlstr(L, buff, tl);  // 创建新字符串
       }
-      else {  /* long string; copy strings directly to final result */
-        ts = luaS_createlngstrobj(L, tl);
-        copy2buff(top, n, getstr(ts));
+      else {  /* long string; copy strings directly to final result 长字符串 */
+        // 为什么不使用上面短字符串的创建buff再拷贝到buff里 使用luaS_newlstr创建字符串?
+        // 这里如果使用 char buff[tl] 然后再拷贝进去会有可能造成栈溢出
+        // 如果使用malloc再free就不如使用下面的方式了
+        ts = luaS_createlngstrobj(L, tl);  // 创建字符串对象 申请字符串的空间
+        copy2buff(top, n, getstr(ts));     // 把实际内容拷贝进去
       }
       setsvalue2s(L, top - n, ts);  /* create result */
     }
-    total -= n-1;  /* got 'n' strings to create 1 new */
-    L->top -= n-1;  /* popped 'n' strings and pushed one */
+    total -= n-1;  /* got 'n' strings to create 1 new 这一轮已经合并了n-1个了 */
+    L->top -= n-1;  /* popped 'n' strings and pushed one top要向前移动n-1个 */
   } while (total > 1);  /* repeat until only 1 result left */
 }
 
@@ -609,6 +664,7 @@ lua_Integer luaV_shiftl (lua_Integer x, lua_Integer y) {
 */
 static LClosure *getcached (Proto *p, UpVal **encup, StkId base) {
   LClosure *c = p->cache;
+  // 如果有缓存的闭包 检查这个缓存的闭包的upvalue是否与当前需要的完全一致
   if (c != NULL) {  /* is there a cached closure? */
     int nup = p->sizeupvalues;
     Upvaldesc *uv = p->upvalues;
@@ -634,9 +690,12 @@ static void pushclosure (lua_State *L, Proto *p, UpVal **encup, StkId base,
   int nup = p->sizeupvalues;
   Upvaldesc *uv = p->upvalues;
   int i;
+  // 创建一个新的lua函数闭包,写入OP_CLOSURE的参数A位置
   LClosure *ncl = luaF_newLclosure(L, nup);
+  // 新建的闭包的与传入的原型联系起来
   ncl->p = p;
   setclLvalue(L, ra, ncl);  /* anchor new closure in stack */
+  // 为新建的闭包写入upvalue信息
   for (i = 0; i < nup; i++) {  /* fill in its upvalues */
     if (uv[i].instack)  /* upvalue refers to local variable? */
       ncl->upvals[i] = luaF_findupval(L, base + uv[i].idx);
@@ -645,6 +704,8 @@ static void pushclosure (lua_State *L, Proto *p, UpVal **encup, StkId base,
     ncl->upvals[i]->refcount++;
     /* new closure is white, so we do not need a barrier here */
   }
+  // 在原型上缓存新建的闭包,getcached函数复用
+  // 如果继续调用这个函数就不用重新创建了
   if (!isblack(p))  /* cache will not break GC invariant? */
     p->cache = ncl;  /* save it on cache for reuse */
 }
@@ -771,6 +832,7 @@ void luaV_finishOp (lua_State *L) {
 ** copy of 'luaV_gettable', but protecting the call to potential
 ** metamethod (which can reallocate the stack)
 */
+// 传入表t和键k,将查询结果写入v
 #define gettableProtected(L,t,k,v)  { const TValue *slot; \
   if (luaV_fastget(L,t,k,slot,luaH_get)) { setobj2s(L, v, slot); } \
   else Protect(luaV_finishget(L,t,k,v,slot)); }
@@ -788,6 +850,8 @@ void luaV_execute (lua_State *L) {
   LClosure *cl;
   TValue *k;
   StkId base;
+  // 进入luaV_execute函数的CallInfo被标记CIST_FRESH
+  // 用来识别当前CallInfo是不是进入时的那一个
   ci->callstatus |= CIST_FRESH;  /* fresh invocation of 'luaV_execute" */
  newframe:  /* reentry point when frame changes (call/return) */
   lua_assert(ci == L->ci);
@@ -798,6 +862,7 @@ void luaV_execute (lua_State *L) {
   for (;;) {
     Instruction i;
     StkId ra;
+    // 获取当前指令i和参数A代表的寄存器位置ra,让ci->u.l.savedpc自增
     vmfetch();
     vmdispatch (GET_OPCODE(i)) {
       vmcase(OP_MOVE) {
@@ -809,6 +874,7 @@ void luaV_execute (lua_State *L) {
         setobj2s(L, ra, rb);
         vmbreak;
       }
+      // OP_LOADKX还需要一条OP_EXTRAARG指令进行配合
       vmcase(OP_LOADKX) {
         TValue *rb;
         lua_assert(GET_OPCODE(*ci->u.l.savedpc) == OP_EXTRAARG);
@@ -822,6 +888,7 @@ void luaV_execute (lua_State *L) {
         vmbreak;
       }
       vmcase(OP_LOADNIL) {
+        // 总共需要设置b+1次nil
         int b = GETARG_B(i);
         do {
           setnilvalue(ra++);
@@ -875,6 +942,8 @@ void luaV_execute (lua_State *L) {
         vmbreak;
       }
       vmcase(OP_SELF) {
+        // 让B位置赋值到A
+        // 查询B.C放到A+1位置
         const TValue *aux;
         StkId rb = RB(i);
         TValue *rc = RKC(i);
@@ -1137,7 +1206,9 @@ void luaV_execute (lua_State *L) {
           Protect((void)0);  /* update 'base' */
         }
         else {  /* Lua function */
+          // 在上面luaD_precall中修改了L->ci的指向
           ci = L->ci;
+          // 每次新调用一个lua函数就重新开始for循环
           goto newframe;  /* restart luaV_execute over new Lua function */
         }
         vmbreak;
@@ -1176,13 +1247,19 @@ void luaV_execute (lua_State *L) {
       vmcase(OP_RETURN) {
         int b = GETARG_B(i);
         if (cl->p->sizep > 0) luaF_close(L, base);
+        // 返回值的个数是b-1,如果b是0 返回值就是从A到栈顶
         b = luaD_poscall(L, ci, ra, (b != 0 ? b - 1 : cast_int(L->top - ra)));
+        // 只有第一次执行的ci标记了CIST_FRESH
+        // 当前已经到了最外部函数,执行结束
         if (ci->callstatus & CIST_FRESH)  /* local 'ci' still from callee */
           return;  /* external invocation: return */
         else {  /* invocation via reentry: continue execution */
+          // 设置ci为外部函数
           ci = L->ci;
           if (b) L->top = ci->top;
           lua_assert(isLua(ci));
+          // 现在ci是外部函数
+          // 因为刚从函数调用退出来,ci即将执行的指令的前一条必定是OP_CALL
           lua_assert(GET_OPCODE(*((ci)->u.l.savedpc - 1)) == OP_CALL);
           goto newframe;  /* restart luaV_execute over new Lua function */
         }
@@ -1283,25 +1360,33 @@ void luaV_execute (lua_State *L) {
         vmbreak;
       }
       vmcase(OP_CLOSURE) {
+        // 找到要创建的函数的原型
         Proto *p = cl->p->p[GETARG_Bx(i)];
+        // 先查询缓存
         LClosure *ncl = getcached(p, cl->upvals, base);  /* cached closure */
         if (ncl == NULL)  /* no match? */
+          // 没有缓存结果 生成函数闭包
           pushclosure(L, p, cl->upvals, base, ra);  /* create a new one */
         else
+          // 有缓存结果 直接写入寄存器
           setclLvalue(L, ra, ncl);  /* push cashed closure */
         checkGC(L, ra + 1);
         vmbreak;
       }
       vmcase(OP_VARARG) {
+        // B-1是读取的结果个数
         int b = GETARG_B(i) - 1;  /* required results */
         int j;
+        // 计算出...代表的结果的个数,也就是调用函数的时候给...传递的参数个数
         int n = cast_int(base - ci->func) - cl->p->numparams - 1;
         if (n < 0)  /* less arguments than parameters? */
           n = 0;  /* no vararg arguments */
+        // b<0也就是B传入的0,代表获取可变参数的所有结果
         if (b < 0) {  /* B == 0? */
           b = n;  /* get all var. arguments */
           Protect(luaD_checkstack(L, n));
           ra = RA(i);  /* previous call may change the stack */
+          // 从A寄存器开始写入...的所有结果,并设置栈顶
           L->top = ra + n;
         }
         for (j = 0; j < b && j < n; j++)

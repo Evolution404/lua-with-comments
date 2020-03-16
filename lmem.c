@@ -42,7 +42,7 @@
 
 // 有关 realloc 函数
 // void * frealloc (void *ud, void *ptr, size_t osize, size_t nsize);
-// 'osize' 是 old size， 'nsize' 是 new size
+// 'osize' 是 old size, 'nsize' 是 new size
 // frealloc(ud, NULL, x, s) 分配一块s大小的内存(不管x)
 // frealloc(ud, p, x, 0) 释放p指向的内存块 这种情况下返回值是NULL
 //  特别的 frealloc(ud, NULL, 0, 0) 什么也不做 等价于 free(NULL)
@@ -67,7 +67,7 @@ void *luaM_growaux_ (lua_State *L, void *block, int *size, size_t size_elems,
   }
   else {
     newsize = (*size)*2;
-    if (newsize < MINSIZEARRAY)
+    if (newsize < MINSIZEARRAY)  // 新空间最小是4
       newsize = MINSIZEARRAY;  /* minimum size */
   }
   // 重新分配空间

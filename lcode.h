@@ -1,6 +1,6 @@
 /*
 ** $Id: lcode.h,v 1.64 2016/01/05 16:22:37 roberto Exp $
-** Code generator for Lua
+** Code generator for Lua Lua代码生成器
 ** See Copyright Notice in lua.h
 */
 
@@ -17,12 +17,14 @@
 ** Marks the end of a patch list. It is an invalid value both as an absolute
 ** address, and as a list link (would link an element to itself).
 */
+// 标记truelist和falselist的结束位置
 #define NO_JUMP (-1)
 
 
 /*
 ** grep "ORDER OPR" if you change these enums  (ORDER OP)
 */
+// 二元操作符(binary operator)
 typedef enum BinOpr {
   OPR_ADD, OPR_SUB, OPR_MUL, OPR_MOD, OPR_POW,
   OPR_DIV,
@@ -37,12 +39,17 @@ typedef enum BinOpr {
 } BinOpr;
 
 
+// 一元操作符(unary operator)
+// 对应的操作符           -          ~        not       #
 typedef enum UnOpr { OPR_MINUS, OPR_BNOT, OPR_NOT, OPR_LEN, OPR_NOUNOPR } UnOpr;
 
 
 /* get (pointer to) instruction of given 'expdesc' */
+// 查询表达式对应的字节码
 #define getinstruction(fs,e)	((fs)->f->code[(e)->u.info])
 
+// 构建iAsBx类型的指令利用codeABx函数
+// sBx加上MAXARG_sBx 利用这种方式用无符号类型来表示有符号数
 #define luaK_codeAsBx(fs,o,A,sBx)	luaK_codeABx(fs,o,A,(sBx)+MAXARG_sBx)
 
 #define luaK_setmultret(fs,e)	luaK_setreturns(fs, e, LUA_MULTRET)

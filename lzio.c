@@ -38,6 +38,7 @@ int luaZ_fill (ZIO *z) {
 
 
 // 初始化一个ZIO对象
+// 这个函数只有在lua_load中的一次调用,reader其实就是getF函数
 void luaZ_init (lua_State *L, ZIO *z, lua_Reader reader, void *data) {
   z->L = L;
   z->reader = reader;
@@ -47,9 +48,8 @@ void luaZ_init (lua_State *L, ZIO *z, lua_Reader reader, void *data) {
 }
 
 
-/* --------------------------------------------------------------- read --- */
 // 从z中读取n个字符到b中
-// 返回值是 n-读到的字节数
+// 返回值是还需要读取的字符数,如果读取完成就返回0
 size_t luaZ_read (ZIO *z, void *b, size_t n) {
   while (n) {
     size_t m;
@@ -72,4 +72,3 @@ size_t luaZ_read (ZIO *z, void *b, size_t n) {
   }
   return 0;
 }
-

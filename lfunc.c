@@ -46,7 +46,7 @@ LClosure *luaF_newLclosure (lua_State *L, int n) {
 /*
 ** fill a closure with new closed upvalues
 */
-// 为LClosure的upvalue设置closed状态的初始值
+// 初始化lua函数的upval为关闭状态的nil值
 void luaF_initupvals (lua_State *L, LClosure *cl) {
   int i;
   for (i = 0; i < cl->nupvalues; i++) {
@@ -135,6 +135,7 @@ Proto *luaF_newproto (lua_State *L) {
 
 
 // 释放一个proto对象
+// 释放proto对象就是要释放它的几个数组
 void luaF_freeproto (lua_State *L, Proto *f) {
   luaM_freearray(L, f->code, f->sizecode);
   luaM_freearray(L, f->p, f->sizep);

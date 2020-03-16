@@ -218,6 +218,7 @@ typedef unsigned long Instruction;
 
 /* minimum size for string buffer */
 // 字符串缓存的最小值
+// 词法缓存的最小值
 #if !defined(LUA_MINBUFFER)
 #define LUA_MINBUFFER	32
 #endif

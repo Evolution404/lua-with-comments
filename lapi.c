@@ -57,28 +57,39 @@ const char lua_ident[] =
 	api_check(l, isstackindex(i, o), "index not in the stack")
 
 
+// 通过idx取栈上的值,idx不能为0
+// func func+1      func+2     ... top-1        top
+//         1           2       ... top-func-1 top-func
+//      func+1-top  func+2-top       -1          0
+// idx>0 L->ci->func+idx
+// -1000000-1000<idx<=0 L->top+idx
+// idx=-1000000-1000 返回注册表
+// idx<-1000000-1000 去upvalues中查找
 static TValue *index2addr (lua_State *L, int idx) {
   CallInfo *ci = L->ci;
-  if (idx > 0) {
+  if (idx > 0) {  // 返回ci->func+idx
     TValue *o = ci->func + idx;
+    // 确保取的值在ci->top前
     api_check(L, idx <= ci->top - (ci->func + 1), "unacceptable index");
-    if (o >= L->top) return NONVALIDVALUE;
+    if (o >= L->top) return NONVALIDVALUE;  // 超过L->top无效
     else return o;
   }
-  else if (!ispseudo(idx)) {  /* negative index */
+  else if (!ispseudo(idx)) {  /* negative index -1000000-1000<idx<=0  */
+    // 确保func+1<= L->top + idx <top
     api_check(L, idx != 0 && -idx <= L->top - (ci->func + 1), "invalid index");
+    // -1 得到 top-1 最小取到 func+1
     return L->top + idx;
   }
-  else if (idx == LUA_REGISTRYINDEX)
+  else if (idx == LUA_REGISTRYINDEX)  // 访问伪索引返回全局注册表
     return &G(L)->l_registry;
-  else {  /* upvalues */
-    idx = LUA_REGISTRYINDEX - idx;
+  else {  /* upvalues 取upvalues idx < -1000000-1000 */
+    idx = LUA_REGISTRYINDEX - idx;  // 处理idx变成正数
     api_check(L, idx <= MAXUPVAL + 1, "upvalue index too large");
     if (ttislcf(ci->func))  /* light C function? */
-      return NONVALIDVALUE;  /* it has no upvalues */
+      return NONVALIDVALUE;  /* it has no upvalues 纯c函数没有upvalues */
     else {
       CClosure *func = clCvalue(ci->func);
-      return (idx <= func->nupvalues) ? &func->upvalue[idx-1] : NONVALIDVALUE;
+      return (idx <= func->nupvalues) ? &func->upvalue[idx-1] : NONVALIDVALUE;  // 返回upvalue
     }
   }
 }
@@ -94,18 +105,19 @@ static void growstack (lua_State *L, void *ud) {
 }
 
 
+// 确保栈上至少还有n个空间 成功返回1 失败返回0
 LUA_API int lua_checkstack (lua_State *L, int n) {
   int res;
   CallInfo *ci = L->ci;
   lua_lock(L);
   api_check(L, n >= 0, "negative 'n'");
-  if (L->stack_last - L->top > n)  /* stack large enough? */
+  if (L->stack_last - L->top > n)  /* stack large enough? 本来就有n个以上空间 */
     res = 1;  /* yes; check is OK */
-  else {  /* no; need to grow stack */
+  else {  /* no; need to grow stack 空间不足需要重新分配 */
     int inuse = cast_int(L->top - L->stack) + EXTRA_STACK;
-    if (inuse > LUAI_MAXSTACK - n)  /* can grow without overflow? */
+    if (inuse > LUAI_MAXSTACK - n)  /* can grow without overflow? 不能增加了 */
       res = 0;  /* no */
-    else  /* try to grow stack */
+    else  /* try to grow stack 扩张栈空间 */
       res = (luaD_rawrunprotected(L, &growstack, &n) == LUA_OK);
   }
   if (res && ci->top < L->top + n)
@@ -115,6 +127,7 @@ LUA_API int lua_checkstack (lua_State *L, int n) {
 }
 
 
+// 从from的栈顶上移动n个值到to的栈上 from栈顶下降n
 LUA_API void lua_xmove (lua_State *from, lua_State *to, int n) {
   int i;
   if (from == to) return;
@@ -141,6 +154,7 @@ LUA_API lua_CFunction lua_atpanic (lua_State *L, lua_CFunction panicf) {
 }
 
 
+// version是一个静态变量,全局唯一保存一个version变量
 LUA_API const lua_Number *lua_version (lua_State *L) {
   static const lua_Number version = LUA_VERSION_NUM;
   if (L == NULL) return &version;
@@ -157,6 +171,11 @@ LUA_API const lua_Number *lua_version (lua_State *L) {
 /*
 ** convert an acceptable stack index into an absolute index
 */
+// 如下是正负数的对应关系
+//   func func+1      func+2     ... top-1        top
+// +         1           2       ... top-func-1 top-func
+// -      func+1-top  func+2-top       -1          0
+// -1对应的是top-func-1 也就是idx<0转换成正数是 top-func+idx
 LUA_API int lua_absindex (lua_State *L, int idx) {
   return (idx > 0 || ispseudo(idx))
          ? idx
@@ -164,21 +183,27 @@ LUA_API int lua_absindex (lua_State *L, int idx) {
 }
 
 
+// 返回的是top-1位置的idx
 LUA_API int lua_gettop (lua_State *L) {
   return cast_int(L->top - (L->ci->func + 1));
 }
 
 
+// 设置top的位置
+// 正数: top = func+1+idx  传入0 top指向func+1
+// 负数: top = top+1+idx   传入-1 top指向top 传入-2 top指向top-1
 LUA_API void lua_settop (lua_State *L, int idx) {
   StkId func = L->ci->func;
   lua_lock(L);
-  if (idx >= 0) {
+  if (idx >= 0) {  // 输入正数
+    // 确保top最小到func+1 最大到stack_last
     api_check(L, idx <= L->stack_last - (func + 1), "new top too large");
-    while (L->top < (func + 1) + idx)
+    while (L->top < (func + 1) + idx)  // 如果栈扩张 新增的数据都是nil
       setnilvalue(L->top++);
-    L->top = (func + 1) + idx;
+    L->top = (func + 1) + idx;  // 设置top的位置
   }
-  else {
+  else {  // 负数
+    // 确保top最小移动到func+1
     api_check(L, -(idx+1) <= (L->top - (func + 1)), "invalid new top");
     L->top += idx+1;  /* 'subtract' index (index is negative) */
   }
@@ -190,9 +215,8 @@ LUA_API void lua_settop (lua_State *L, int idx) {
 ** Reverse the stack segment from 'from' to 'to'
 ** (auxiliary to 'lua_rotate')
 */
-// 这个操作是针对lua栈的元素
-// 将输入的from与to之间的元素进行反转
-// from 与 to 都是lua栈的元素
+// 将栈上from和to之间的值反转 lua_rotate的辅助函数
+// 例如 a b c 执行后 c b a
 static void reverse (lua_State *L, StkId from, StkId to) {
   for (; from < to; from++, to--) {
     TValue temp;
@@ -207,24 +231,33 @@ static void reverse (lua_State *L, StkId from, StkId to) {
 ** Let x = AB, where A is a prefix of length 'n'. Then,
 ** rotate x n == BA. But BA == (A^r . B^r)^r.
 */
+// 将从idx开始到栈顶的值进行左移(n>0)或右移(n<0)
 // 假设从idx开始到最后是12345
 // 当输入n=3  结果为34512 右移了3位
 // 当输入n=-3 结果为45123 左移了3位
 LUA_API void lua_rotate (lua_State *L, int idx, int n) {
   StkId p, t, m;
   lua_lock(L);
+  // t是要移动的开始位置
   t = L->top - 1;  /* end of stack segment being rotated */
+  // p是要移动的结束位置
   p = index2addr(L, idx);  /* start of segment */
   api_checkstackindex(L, idx, p);
   api_check(L, (n >= 0 ? n : -n) <= (t - p + 1), "invalid 'n'");
+  // m是两次反转的分割位置
   m = (n >= 0 ? t - n : p - n - 1);  /* end of prefix */
+  // 例如12345右移3位 p指向1 m指向2
+  // 反转p和m之间:21345
   reverse(L, p, m);  /* reverse the prefix with length 'n' */
+  // 反转m+1和t之间:21543
   reverse(L, m + 1, t);  /* reverse the suffix */
+  // 反转p和t之间:34512
   reverse(L, p, t);  /* reverse the entire segment */
   lua_unlock(L);
 }
 
 
+// 设置toidx的值位fromidx
 LUA_API void lua_copy (lua_State *L, int fromidx, int toidx) {
   TValue *fr, *to;
   lua_lock(L);
@@ -240,6 +273,7 @@ LUA_API void lua_copy (lua_State *L, int fromidx, int toidx) {
 }
 
 
+// 将idx位置值压入栈顶
 LUA_API void lua_pushvalue (lua_State *L, int idx) {
   lua_lock(L);
   setobj2s(L, L->top, index2addr(L, idx));
@@ -298,29 +332,38 @@ LUA_API int lua_isuserdata (lua_State *L, int idx) {
 }
 
 
+// 比较index1和index2上的值是否相等 不查询元表
 LUA_API int lua_rawequal (lua_State *L, int index1, int index2) {
+  // 通过index2addr获得的结果可能是无效的
+  // 也就是luaO_nilobject,通过isvalid检测
   StkId o1 = index2addr(L, index1);
   StkId o2 = index2addr(L, index2);
   return (isvalid(o1) && isvalid(o2)) ? luaV_rawequalobj(o1, o2) : 0;
 }
 
 
+// 将栈顶的1个或2个操作数执行op运算 删除操作数栈顶保留运算结果
 LUA_API void lua_arith (lua_State *L, int op) {
   lua_lock(L);
-  if (op != LUA_OPUNM && op != LUA_OPBNOT)
+  if (op != LUA_OPUNM && op != LUA_OPBNOT)  // 取负和按位取反是一元运算
+    // 不是取负和按位取反都需要两个参数
     api_checknelems(L, 2);  /* all other operations expect two operands */
   else {  /* for unary operations, add fake 2nd operand */
+    // 一元运算在栈上拷贝一个值模拟成二元运算
     api_checknelems(L, 1);
     setobjs2s(L, L->top, L->top - 1);
     api_incr_top(L);
   }
   /* first operand at top - 2, second at top - 1; result go to top - 2 */
+  // top -2 = top-2 op top-1
   luaO_arith(L, op, L->top - 2, L->top - 1, L->top - 2);
+  // 栈顶只保留运算结果
   L->top--;  /* remove second operand */
   lua_unlock(L);
 }
 
 
+// 对index1和index2的值进行相等,小于,小于等于的比较
 LUA_API int lua_compare (lua_State *L, int index1, int index2, int op) {
   StkId o1, o2;
   int i = 0;
@@ -329,9 +372,9 @@ LUA_API int lua_compare (lua_State *L, int index1, int index2, int op) {
   o2 = index2addr(L, index2);
   if (isvalid(o1) && isvalid(o2)) {
     switch (op) {
-      case LUA_OPEQ: i = luaV_equalobj(L, o1, o2); break;
-      case LUA_OPLT: i = luaV_lessthan(L, o1, o2); break;
-      case LUA_OPLE: i = luaV_lessequal(L, o1, o2); break;
+      case LUA_OPEQ: i = luaV_equalobj(L, o1, o2); break;  // == L是否为NULL决定是否查询元表
+      case LUA_OPLT: i = luaV_lessthan(L, o1, o2); break;  // <
+      case LUA_OPLE: i = luaV_lessequal(L, o1, o2); break; // <=
       default: api_check(L, 0, "invalid option");
     }
   }
@@ -376,10 +419,12 @@ LUA_API int lua_toboolean (lua_State *L, int idx) {
 }
 
 
+// 将栈上值转换成字符串 设置len为字符串长度
+// 返回转换后字符串的地址
 LUA_API const char *lua_tolstring (lua_State *L, int idx, size_t *len) {
   StkId o = index2addr(L, idx);
   if (!ttisstring(o)) {
-    if (!cvt2str(o)) {  /* not convertible? */
+    if (!cvt2str(o)) {  /* not convertible? 检测能不能转换成字符串 */
       if (len != NULL) *len = 0;
       return NULL;
     }
@@ -395,6 +440,7 @@ LUA_API const char *lua_tolstring (lua_State *L, int idx, size_t *len) {
 }
 
 
+// 直接返回对象的长度
 LUA_API size_t lua_rawlen (lua_State *L, int idx) {
   StkId o = index2addr(L, idx);
   switch (ttype(o)) {
@@ -432,6 +478,8 @@ LUA_API lua_State *lua_tothread (lua_State *L, int idx) {
 }
 
 
+// 返回栈上值 实际存储位置的指针
+// 就是利用print函数打印出来显示的指针
 LUA_API const void *lua_topointer (lua_State *L, int idx) {
   StkId o = index2addr(L, idx);
   switch (ttype(o)) {
@@ -453,6 +501,7 @@ LUA_API const void *lua_topointer (lua_State *L, int idx) {
 */
 
 
+// 栈顶设置为nil
 LUA_API void lua_pushnil (lua_State *L) {
   lua_lock(L);
   setnilvalue(L->top);
@@ -461,6 +510,7 @@ LUA_API void lua_pushnil (lua_State *L) {
 }
 
 
+// 栈顶设置为浮点数
 LUA_API void lua_pushnumber (lua_State *L, lua_Number n) {
   lua_lock(L);
   setfltvalue(L->top, n);
@@ -469,6 +519,7 @@ LUA_API void lua_pushnumber (lua_State *L, lua_Number n) {
 }
 
 
+// 栈顶设置整数
 LUA_API void lua_pushinteger (lua_State *L, lua_Integer n) {
   lua_lock(L);
   setivalue(L->top, n);
@@ -482,6 +533,7 @@ LUA_API void lua_pushinteger (lua_State *L, lua_Integer n) {
 ** 'len' == 0 (as 's' can be NULL in that case), due to later use of
 ** 'memcmp' and 'memcpy'.
 */
+// 栈顶设置值为s字符串 调用指定长度 返回虚拟存放字符串地址
 LUA_API const char *lua_pushlstring (lua_State *L, const char *s, size_t len) {
   TString *ts;
   lua_lock(L);
@@ -494,6 +546,7 @@ LUA_API const char *lua_pushlstring (lua_State *L, const char *s, size_t len) {
 }
 
 
+// 栈顶设置值为s字符串 不指定长度 返回虚拟存放字符串地址
 LUA_API const char *lua_pushstring (lua_State *L, const char *s) {
   lua_lock(L);
   if (s == NULL)
@@ -511,6 +564,7 @@ LUA_API const char *lua_pushstring (lua_State *L, const char *s) {
 }
 
 
+// 将格式化字符串放入栈顶 返回格式化后的字符串
 LUA_API const char *lua_pushvfstring (lua_State *L, const char *fmt,
                                       va_list argp) {
   const char *ret;
@@ -522,6 +576,8 @@ LUA_API const char *lua_pushvfstring (lua_State *L, const char *fmt,
 }
 
 
+// 同上 调用方式不同
+// 将格式化字符串放入栈顶 返回格式化后的字符串
 LUA_API const char *lua_pushfstring (lua_State *L, const char *fmt, ...) {
   const char *ret;
   va_list argp;
@@ -535,6 +591,9 @@ LUA_API const char *lua_pushfstring (lua_State *L, const char *fmt, ...) {
 }
 
 
+// 栈顶设置一个c函数闭包 n是upvalue的个数
+// 执行前n个upvalue都放在栈顶 执行后n个upvalue拷贝到新建的CClosure中
+// 清除栈上n个upvalue, 栈顶向前移动n个, 压入CClosure 栈顶自增
 LUA_API void lua_pushcclosure (lua_State *L, lua_CFunction fn, int n) {
   lua_lock(L);
   if (n == 0) {
@@ -544,14 +603,15 @@ LUA_API void lua_pushcclosure (lua_State *L, lua_CFunction fn, int n) {
     CClosure *cl;
     api_checknelems(L, n);
     api_check(L, n <= MAXUPVAL, "upvalue index too large");
-    cl = luaF_newCclosure(L, n);
+    cl = luaF_newCclosure(L, n);  // 新建c函数闭包
     cl->f = fn;
-    L->top -= n;
+    L->top -= n;  // n个upvalue移出栈
+    // 拷贝栈上的n个upvalue到cl中
     while (n--) {
       setobj2n(L, &cl->upvalue[n], L->top + n);
       /* does not need barrier because closure is white */
     }
-    setclCvalue(L, L->top, cl);
+    setclCvalue(L, L->top, cl);  // c函数闭包cl压入栈顶
   }
   api_incr_top(L);
   luaC_checkGC(L);
@@ -559,14 +619,16 @@ LUA_API void lua_pushcclosure (lua_State *L, lua_CFunction fn, int n) {
 }
 
 
+// 将布尔值压入栈顶 压入的值一定是0或1
 LUA_API void lua_pushboolean (lua_State *L, int b) {
   lua_lock(L);
-  setbvalue(L->top, (b != 0));  /* ensure that true is 1 */
+  setbvalue(L->top, (b != 0));  /* ensure that true is 1 将非0值都转换成1 */
   api_incr_top(L);
   lua_unlock(L);
 }
 
 
+// 将用户数据压入栈顶
 LUA_API void lua_pushlightuserdata (lua_State *L, void *p) {
   lua_lock(L);
   setpvalue(L->top, p);
@@ -575,6 +637,8 @@ LUA_API void lua_pushlightuserdata (lua_State *L, void *p) {
 }
 
 
+// 将传入线程压入栈顶
+// 返回主线程是否是传入的线程
 LUA_API int lua_pushthread (lua_State *L) {
   lua_lock(L);
   setthvalue(L, L->top, L);
@@ -590,23 +654,27 @@ LUA_API int lua_pushthread (lua_State *L) {
 */
 
 
+// 从表t中查询k项 返回查询结果元素的类型
+// 先直接查询表项,查询不到使用元方法查询 设置栈顶为查询结果
 static int auxgetstr (lua_State *L, const TValue *t, const char *k) {
   const TValue *slot;
   TString *str = luaS_new(L, k);
-  if (luaV_fastget(L, t, str, slot, luaH_getstr)) {
-    setobj2s(L, L->top, slot);
+  if (luaV_fastget(L, t, str, slot, luaH_getstr)) {  // 从表t中读取str项
+    setobj2s(L, L->top, slot);  // 取出的值放入栈顶
     api_incr_top(L);
   }
   else {
     setsvalue2s(L, L->top, str);
     api_incr_top(L);
-    luaV_finishget(L, t, L->top - 1, L->top - 1, slot);
+    luaV_finishget(L, t, L->top - 1, L->top - 1, slot);  // 尝试搜索元方法
   }
   lua_unlock(L);
-  return ttnov(L->top - 1);
+  return ttnov(L->top - 1);  // 返回栈顶的类型
 }
 
 
+// 设置 _G[name] 到栈顶
+// 返回查询结果的类型
 LUA_API int lua_getglobal (lua_State *L, const char *name) {
   Table *reg = hvalue(&G(L)->l_registry);
   lua_lock(L);
@@ -614,6 +682,8 @@ LUA_API int lua_getglobal (lua_State *L, const char *name) {
 }
 
 
+// t为idx位置的表
+// top-1=t[top-1] 修改栈顶的值为表中项 返回查询结果的类型
 LUA_API int lua_gettable (lua_State *L, int idx) {
   StkId t;
   lua_lock(L);
@@ -624,12 +694,16 @@ LUA_API int lua_gettable (lua_State *L, int idx) {
 }
 
 
+// 查询idx位置值的k键的值 压入栈顶 返回查询结果的类型
+// 与上一个函数区别是指定了要查询的key 并且将结果压入栈
+// 上面的函数没有指定key 结果直接替换了栈顶被使用的key
 LUA_API int lua_getfield (lua_State *L, int idx, const char *k) {
   lua_lock(L);
   return auxgetstr(L, index2addr(L, idx), k);
 }
 
 
+// 设置top-1 = t[n]
 LUA_API int lua_geti (lua_State *L, int idx, lua_Integer n) {
   StkId t;
   const TValue *slot;
@@ -649,6 +723,9 @@ LUA_API int lua_geti (lua_State *L, int idx, lua_Integer n) {
 }
 
 
+// idx对应的值是一个表
+// top-1=t[top-1] 不查询元表
+// 返回查询结果的类型
 LUA_API int lua_rawget (lua_State *L, int idx) {
   StkId t;
   lua_lock(L);
@@ -660,6 +737,7 @@ LUA_API int lua_rawget (lua_State *L, int idx) {
 }
 
 
+// top-1 = t[n] 查询结果压入栈顶,不查询元表
 LUA_API int lua_rawgeti (lua_State *L, int idx, lua_Integer n) {
   StkId t;
   lua_lock(L);
@@ -672,13 +750,14 @@ LUA_API int lua_rawgeti (lua_State *L, int idx, lua_Integer n) {
 }
 
 
+// top-1 = t[p] 查询结果压入栈顶,不查询元表
 LUA_API int lua_rawgetp (lua_State *L, int idx, const void *p) {
   StkId t;
   TValue k;
   lua_lock(L);
   t = index2addr(L, idx);
   api_check(L, ttistable(t), "table expected");
-  setpvalue(&k, cast(void *, p));
+  setpvalue(&k, cast(void *, p));  // 轻量级用户数据
   setobj2s(L, L->top, luaH_get(hvalue(t), &k));
   api_incr_top(L);
   lua_unlock(L);
@@ -686,6 +765,7 @@ LUA_API int lua_rawgetp (lua_State *L, int idx, const void *p) {
 }
 
 
+// 新建一个table对象放到栈顶
 LUA_API void lua_createtable (lua_State *L, int narray, int nrec) {
   Table *t;
   lua_lock(L);
@@ -699,6 +779,8 @@ LUA_API void lua_createtable (lua_State *L, int narray, int nrec) {
 }
 
 
+// 获取objindex位置的元表 将获取到元表压入栈顶
+// 返回1获取成功 返回0获取失败没有对栈进行操作
 LUA_API int lua_getmetatable (lua_State *L, int objindex) {
   const TValue *obj;
   Table *mt;
@@ -726,6 +808,7 @@ LUA_API int lua_getmetatable (lua_State *L, int objindex) {
 }
 
 
+// 将idx位置用户数据压入栈顶
 LUA_API int lua_getuservalue (lua_State *L, int idx) {
   StkId o;
   lua_lock(L);
@@ -745,22 +828,27 @@ LUA_API int lua_getuservalue (lua_State *L, int idx) {
 /*
 ** t[k] = value at the top of the stack (where 'k' is a string)
 */
+// 设置t[k]的值为当前栈顶的值 设置完成弹出栈顶
+// aux auxiliary辅助
 static void auxsetstr (lua_State *L, const TValue *t, const char *k) {
   const TValue *slot;
   TString *str = luaS_new(L, k);
   api_checknelems(L, 1);
+  // 设置t[str]项为 L->top-1的值
   if (luaV_fastset(L, t, str, slot, luaH_getstr, L->top - 1))
     L->top--;  /* pop value */
   else {
-    setsvalue2s(L, L->top, str);  /* push 'str' (to make it a TValue) */
+    setsvalue2s(L, L->top, str);  /* push 'str' (to make it a TValue) 将要查询的key放到栈顶 */
     api_incr_top(L);
+    // 设置t在键L->top-1上对应值为L->top-2上的值
     luaV_finishset(L, t, L->top - 1, L->top - 2, slot);
-    L->top -= 2;  /* pop value and key */
+    L->top -= 2;  /* pop value and key 弹出两个值 */
   }
   lua_unlock(L);  /* lock done by caller */
 }
 
 
+// 设置 _G[name] = 栈顶的值 弹出栈顶
 LUA_API void lua_setglobal (lua_State *L, const char *name) {
   Table *reg = hvalue(&G(L)->l_registry);
   lua_lock(L);  /* unlock done in 'auxsetstr' */
@@ -768,6 +856,7 @@ LUA_API void lua_setglobal (lua_State *L, const char *name) {
 }
 
 
+// t[top-2]=top-1 弹出 top-2和top-1
 LUA_API void lua_settable (lua_State *L, int idx) {
   StkId t;
   lua_lock(L);
@@ -779,12 +868,15 @@ LUA_API void lua_settable (lua_State *L, int idx) {
 }
 
 
+// 设置idx位置k键的值为当前栈顶的值 设置完成弹出栈顶
+// t[k]=top-1 弹出top-1
 LUA_API void lua_setfield (lua_State *L, int idx, const char *k) {
   lua_lock(L);  /* unlock done in 'auxsetstr' */
   auxsetstr(L, index2addr(L, idx), k);
 }
 
 
+// t[n]=top-1 弹出top-1
 LUA_API void lua_seti (lua_State *L, int idx, lua_Integer n) {
   StkId t;
   const TValue *slot;
@@ -803,6 +895,7 @@ LUA_API void lua_seti (lua_State *L, int idx, lua_Integer n) {
 }
 
 
+// t[top-2]=top-1 弹出top-2和top-1 不查询元表
 LUA_API void lua_rawset (lua_State *L, int idx) {
   StkId o;
   TValue *slot;
@@ -819,6 +912,7 @@ LUA_API void lua_rawset (lua_State *L, int idx) {
 }
 
 
+// t[n]=top-1 弹出栈顶 不查询元表
 LUA_API void lua_rawseti (lua_State *L, int idx, lua_Integer n) {
   StkId o;
   lua_lock(L);
@@ -832,6 +926,7 @@ LUA_API void lua_rawseti (lua_State *L, int idx, lua_Integer n) {
 }
 
 
+// t[p]=top-1 弹出栈顶 不查询元表
 LUA_API void lua_rawsetp (lua_State *L, int idx, const void *p) {
   StkId o;
   TValue k, *slot;
@@ -848,21 +943,23 @@ LUA_API void lua_rawsetp (lua_State *L, int idx, const void *p) {
 }
 
 
+// 内置函数setmetatable
+// 设置objindex位置的值的元表为栈顶值,弹出栈顶
 LUA_API int lua_setmetatable (lua_State *L, int objindex) {
   TValue *obj;
   Table *mt;
   lua_lock(L);
   api_checknelems(L, 1);
   obj = index2addr(L, objindex);
-  if (ttisnil(L->top - 1))
+  if (ttisnil(L->top - 1))  // 栈顶元素是nil 那么元表就是NULL
     mt = NULL;
   else {
     api_check(L, ttistable(L->top - 1), "table expected");
-    mt = hvalue(L->top - 1);
+    mt = hvalue(L->top - 1);  // 获取实际要设置的元表
   }
   switch (ttnov(obj)) {
     case LUA_TTABLE: {
-      hvalue(obj)->metatable = mt;
+      hvalue(obj)->metatable = mt;  // 为表类型设置元表
       if (mt) {
         luaC_objbarrier(L, gcvalue(obj), mt);
         luaC_checkfinalizer(L, gcvalue(obj), mt);
@@ -870,7 +967,7 @@ LUA_API int lua_setmetatable (lua_State *L, int objindex) {
       break;
     }
     case LUA_TUSERDATA: {
-      uvalue(obj)->metatable = mt;
+      uvalue(obj)->metatable = mt;  // 为用户数据设置元表
       if (mt) {
         luaC_objbarrier(L, uvalue(obj), mt);
         luaC_checkfinalizer(L, gcvalue(obj), mt);
@@ -878,16 +975,17 @@ LUA_API int lua_setmetatable (lua_State *L, int objindex) {
       break;
     }
     default: {
-      G(L)->mt[ttnov(obj)] = mt;
+      G(L)->mt[ttnov(obj)] = mt;  // 为其他数据类型设置元表
       break;
     }
   }
-  L->top--;
+  L->top--;  // 弹出栈顶
   lua_unlock(L);
   return 1;
 }
 
 
+// 设置idx位置k键的值为当前栈顶的值 弹出栈顶
 LUA_API void lua_setuservalue (lua_State *L, int idx) {
   StkId o;
   lua_lock(L);
@@ -905,12 +1003,14 @@ LUA_API void lua_setuservalue (lua_State *L, int idx) {
 ** 'load' and 'call' functions (run Lua code)
 */
 
-
+// 确保在na个参数和nr和返回值的情况下栈上空间还足够
+// 返回值个数不确定或者栈上增加的参数个数(nr-na)不会溢出
 #define checkresults(L,na,nr) \
      api_check(L, (nr) == LUA_MULTRET || (L->ci->top - L->top >= (nr) - (na)), \
 	"results from function overflow current stack size")
 
 
+// 没有保护的调用
 LUA_API void lua_callk (lua_State *L, int nargs, int nresults,
                         lua_KContext ctx, lua_KFunction k) {
   StkId func;
@@ -918,10 +1018,11 @@ LUA_API void lua_callk (lua_State *L, int nargs, int nresults,
   api_check(L, k == NULL || !isLua(L->ci),
     "cannot use continuations inside hooks");
   api_checknelems(L, nargs+1);
+  // 检查线程状态是否正常,只有处于正常状态下的线程才可以调用目标函数
   api_check(L, L->status == LUA_OK, "cannot do calls on non-normal thread");
   checkresults(L, nargs, nresults);
   func = L->top - (nargs+1);
-  if (k != NULL && L->nny == 0) {  /* need to prepare continuation? */
+  if (k != NULL && L->nny == 0) {  /* need to prepare continuation? 需要保存上下文环境和延续函数 */
     L->ci->u.c.k = k;  /* save continuation */
     L->ci->u.c.ctx = ctx;  /* save context */
     luaD_call(L, func, nresults);  /* do the call */
@@ -950,6 +1051,10 @@ static void f_call (lua_State *L, void *ud) {
 
 
 
+// 有保护的调用
+// 受保护方法的唯一区别:函数的调用都不会因为错误直接导致程序直接退出
+// 而是退回到调用点,然后将状态返回到外层的逻辑处理
+// errfunc传入0代表没有错误处理函数,docall函数中使用了msghandler作为了错误处理函数
 LUA_API int lua_pcallk (lua_State *L, int nargs, int nresults, int errfunc,
                         lua_KContext ctx, lua_KFunction k) {
   struct CallS c;
@@ -968,6 +1073,7 @@ LUA_API int lua_pcallk (lua_State *L, int nargs, int nresults, int errfunc,
     api_checkstackindex(L, errfunc, o);
     func = savestack(L, o);
   }
+  // 获取真正被调用的函数,第一个参数前面就是被调用的函数
   c.func = L->top - (nargs+1);  /* function to be called */
   if (k == NULL || L->nny > 0) {  /* no continuation or no yieldable? */
     c.nresults = nresults;  /* do a 'conventional' protected call */
@@ -1002,9 +1108,11 @@ LUA_API int lua_load (lua_State *L, lua_Reader reader, void *data,
   if (!chunkname) chunkname = "?";
   // 初始化刚才定义的z
   luaZ_init(L, &z, reader, data);
+  // 调用后栈顶就是识别的函数闭包
   status = luaD_protectedparser(L, &z, chunkname, mode);
   if (status == LUA_OK) {  /* no errors? */
     LClosure *f = clLvalue(L->top - 1);  /* get newly created function */
+    // 刚识别完的lua闭包的upvalue还是nil,在这里初始化为_G变量
     if (f->nupvalues >= 1) {  /* does it have an upvalue? */
       /* get global table from registry */
       Table *reg = hvalue(&G(L)->l_registry);
@@ -1159,6 +1267,7 @@ LUA_API void lua_concat (lua_State *L, int n) {
 }
 
 
+// 将对象的长度压入栈顶
 LUA_API void lua_len (lua_State *L, int idx) {
   StkId t;
   lua_lock(L);
@@ -1187,6 +1296,7 @@ LUA_API void lua_setallocf (lua_State *L, lua_Alloc f, void *ud) {
 }
 
 
+// 创建一个userdata压入栈顶 返回userdata的数据实际存放位置
 LUA_API void *lua_newuserdata (lua_State *L, size_t size) {
   Udata *u;
   lua_lock(L);

@@ -712,11 +712,13 @@ static int skipcomment (LoadF *lf, int *cp) {
 }
 
 
+// filename为NULL代表stdin
 LUALIB_API int luaL_loadfilex (lua_State *L, const char *filename,
                                              const char *mode) {
   LoadF lf;
   int status, readstatus;
   int c;
+  // 下面会将文件名压入栈中,所以现在的top+1就是文件的位置
   int fnameindex = lua_gettop(L) + 1;  /* index of filename on the stack */
   if (filename == NULL) { // 如果没有文件名 从stdin中读取
     lua_pushliteral(L, "=stdin");
@@ -972,9 +974,9 @@ LUALIB_API void luaL_openlib (lua_State *L, const char *libname,
 ** function gets the 'nup' elements at the top as upvalues.
 ** Returns with only the table at the stack.
 */
-// 为栈顶的表设置l数组中的键值对, 每个新增的函数都包括同样的n个upvalue
 // 执行前栈顶 t n1 n2 n3
 // 执行后栈顶 t
+// 为栈顶的表设置l数组中的键值对, 每个新增的函数都包括同样的n个upvalue
 LUALIB_API void luaL_setfuncs (lua_State *L, const luaL_Reg *l, int nup) {
   luaL_checkstack(L, nup, "too many upvalues");
   // 进入函数栈顶是用来放入被加载函数的表 t 和 n个upvalue 例如 t n1 n2 n3
@@ -1021,6 +1023,7 @@ LUALIB_API int luaL_getsubtable (lua_State *L, int idx, const char *fname) {
 ** Leaves resulting module on the top.
 */
 // 查询modname是否已经加载 如果没有加载就调用openf加载这个模块
+// 如果glb为true,那么就设置_G[modname] = module
 // 执行后栈顶是openf的返回值
 LUALIB_API void luaL_requiref (lua_State *L, const char *modname,
                                lua_CFunction openf, int glb) {
@@ -1032,6 +1035,7 @@ LUALIB_API void luaL_requiref (lua_State *L, const char *modname,
     lua_pop(L, 1);  /* remove field 删除查询LOADED表的结果 */
     lua_pushcfunction(L, openf);  // 压入打开模块的函数openf
     lua_pushstring(L, modname);  /* argument to open function 压入模块名 */
+    // 调用openf函数,openf有一个参数modname
     lua_call(L, 1, 1);  /* call 'openf' to open module 执行openf */
     lua_pushvalue(L, -1);  /* make copy of module (call result) */
     // 现在栈顶情况 LOADED result result  result是函数执行结果

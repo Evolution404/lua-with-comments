@@ -25,7 +25,9 @@
 
 
 /* test whether thread is in 'twups' list */
-// L与twups不直接相等说明L在twups后面的链上
+// 在新建lua_State对象时设置L->twups=L,只有将该对象加入twups链表时才会不相等
+// 初始化twups为L在preinit_thread中,twups链表在traversethread中链接
+// 所以L与twups不相等说明L在twups链表中
 #define isintwups(L)	(L->twups != L)
 
 
@@ -45,6 +47,8 @@
 // open状态是外层函数还没有返回 open字段用作当前作用域的闭包变量链表
 // closed状态是外层函数返回将闭包变量的值拷贝出来 放在value字段
 struct UpVal {
+  // open状态v指向该upvalue在栈上的值
+  // closed状态v指向u.value
   TValue *v;  /* points to stack or to its own value 指向变量的实际值 */
   lu_mem refcount;  /* reference counter 引用计数 */
   union {

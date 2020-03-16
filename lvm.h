@@ -32,19 +32,23 @@
 ** by flooring them (instead of raising an error if they are not
 ** integral values)
 */
+// 定义LUA_FLOORN2I可以让浮点数向下取整转换为整数
 #if !defined(LUA_FLOORN2I)
 #define LUA_FLOORN2I		0
 #endif
 
-
+// 负责将n转换成浮点数 可以转换浮点数,整数,字符串 返回值:成功为1 失败为0
+// 首先检测是否是浮点数 不是浮点数进入luaV_tonumber_
 #define tonumber(o,n) \
 	(ttisfloat(o) ? (*(n) = fltvalue(o), 1) : luaV_tonumber_(o,n))
 
+// 转换为整数
 #define tointeger(o,i) \
     (ttisinteger(o) ? (*(i) = ivalue(o), 1) : luaV_tointeger(o,i,LUA_FLOORN2I))
 
+// ((lua_Integer)(((lua_Unsigned)(v1)) op ((lua_Unsigned)(v2))))
 #define intop(op,v1,v2) l_castU2S(l_castS2U(v1) op l_castS2U(v2))
-
+// 比较两个原始值是否相等(不考虑元方法)
 #define luaV_rawequalobj(t1,t2)		luaV_equalobj(NULL,t1,t2)
 
 
@@ -55,15 +59,23 @@
 ** pointing to a nil 't[k]' (if 't' is a table) or NULL (otherwise).
 ** 'f' is the raw get function to use.
 */
+// 获取表t的k项 即t[k]
+// 返回1 说明slot指向 t[k]
+// 返回0 说明t是空或者t[k]是空 必须去检查元方法
+//       slot是NULL说明t不是table slot是nil说明t[k]为nil
+// f是从Table中取出第k项调用的方法 在ltable.h中定义 luaH_get luaH_getstr luaH_getint
 #define luaV_fastget(L,t,k,slot,f) \
   (!ttistable(t)  \
    ? (slot = NULL, 0)  /* not a table; 'slot' is NULL and result is 0 */  \
-   : (slot = f(hvalue(t), k),  /* else, do raw access */  \
+   : (slot = f(hvalue(t), k),  /* else, do raw access hvalue从TValue中取出Table类型*/  \
       !ttisnil(slot)))  /* result not nil? */
 
 /*
 ** standard implementation for 'gettable'
 */
+// gettable的标准实现
+// 先使用fastget直接获取 获取失败使用finishget从元方法中获取
+// 执行含义:v = t[k]
 #define luaV_gettable(L,t,k,v) { const TValue *slot; \
   if (luaV_fastget(L,t,k,slot,luaH_get)) { setobj2s(L, v, slot); } \
   else luaV_finishget(L,t,k,v,slot); }
@@ -77,6 +89,7 @@
 ** returns true, there is no need to 'invalidateTMcache', because the
 ** call is not creating a new entry.
 */
+// t是表且t[k]不是nil 进行GC处理 让t[k]直接等于v
 #define luaV_fastset(L,t,k,slot,f,v) \
   (!ttistable(t) \
    ? (slot = NULL, 0) \

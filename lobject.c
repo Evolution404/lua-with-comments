@@ -30,6 +30,9 @@
 
 
 // LUAI_DDEF目前就是空 全局常量在定义时的标记
+// 结构体初始化 {NULL} 会自动让结构体的所有字段都是NULL也就是0
+// const TValue luaO_nilobject_ = {{NULL}, 0};
+// 也就是初始化TValue的value_字段为{NULL}, tt_字段为0
 LUAI_DDEF const TValue luaO_nilobject_ = {NILCONSTANT};
 
 
@@ -121,16 +124,16 @@ static lua_Integer intarith (lua_State *L, int op, lua_Integer v1,
     case LUA_OPBAND: return intop(&, v1, v2);
     case LUA_OPBOR: return intop(|, v1, v2);
     case LUA_OPBXOR: return intop(^, v1, v2);
-    case LUA_OPSHL: return luaV_shiftl(v1, v2);   // 左移
-    case LUA_OPSHR: return luaV_shiftl(v1, -v2);  // 右移
-    case LUA_OPUNM: return intop(-, 0, v1);
-    case LUA_OPBNOT: return intop(^, ~l_castS2U(0), v1);  // 与全1进行 异或 实现按位取反
+    case LUA_OPSHL: return luaV_shiftl(v1, v2);          // 左移
+    case LUA_OPSHR: return luaV_shiftl(v1, -v2);         // 右移
+    case LUA_OPUNM: return intop(-, 0, v1);              // 取负运算,传入v2是假操作数,直接让v1取负就行
+    case LUA_OPBNOT: return intop(^, ~l_castS2U(0), v1); // 与全1进行 异或 实现按位取反
     default: lua_assert(0); return 0;
   }
 }
 
 
-// 关于数字的算术运算
+// 关于浮点数的算术运算
 static lua_Number numarith (lua_State *L, int op, lua_Number v1,
                                                   lua_Number v2) {
   switch (op) {
@@ -188,6 +191,7 @@ void luaO_arith (lua_State *L, int op, const TValue *p1, const TValue *p2,
   }
   /* could not perform raw operation; try metamethod 不是原生操作符 使用元方法 */
   lua_assert(L != NULL);  /* should not fail when folding (compile time) */
+  // 使用op-LUA_OPADD+TM_ADD将op转换成TMS中的值
   luaT_trybinTM(L, p1, p2, res, cast(TMS, (op - LUA_OPADD) + TM_ADD));
 }
 

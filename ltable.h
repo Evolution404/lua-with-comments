@@ -37,7 +37,8 @@
 
 
 /* allocated size for hash nodes */
-// 获取表t哈希部分实际分配的大小 如果是dummy对象说明是0 其他情况再查询t->lsizenode
+// 获取表t哈希部分实际分配的大小,也就是Node对象的个数
+// 如果是dummy对象说明是0 其他情况再查询t->lsizenode
 #define allocsizenode(t)	(isdummy(t) ? 0 : sizenode(t))
 
 
